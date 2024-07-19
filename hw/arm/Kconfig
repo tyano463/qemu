@@ -712,3 +712,10 @@ config ARMSSE
     select UNIMP
     select SSE_COUNTER
     select SSE_TIMER
+
+config RA2L1
+    bool
+    default y
+    depends on TCG && ARM
+    select SERIAL
+    select I2C
