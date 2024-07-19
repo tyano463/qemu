@@ -11,7 +11,7 @@
 #include "hw/qdev-clock.h"
 #include "hw/misc/unimp.h"
 
-#define NUM_IRQ_LINES 64
+#define NUM_IRQ_LINES 32
 #define NUM_PRIO_BITS 3
 
 #define TYPE_RA2L1_SYS "ra2l1-sys"
@@ -20,6 +20,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(ra_state, RA2L1_SYS)
 struct ra_state {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+    qemu_irq irq;
     Clock *sysclk;
 };
 
@@ -50,6 +51,7 @@ static void ra2l1_init(MachineState *machine) {
 
     ra_dev = qdev_new(TYPE_RA2L1_SYS);
     object_property_add_child(soc_container, "sys", OBJECT(ra_dev));
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(ra_dev), &error_fatal);
 
     nvic = qdev_new(TYPE_ARMV7M);
     object_property_add_child(soc_container, "v7m", OBJECT(nvic));
@@ -87,6 +89,23 @@ static void r7fa2l1a_class_init(ObjectClass *oc, void *data) {
     mc->init = ra2l1_init;
     mc->default_cpu_type = ARM_CPU_TYPE_NAME("cortex-m33");
 }
+
+static uint64_t ra_read(void *opaque, hwaddr offset, unsigned size)
+{
+    return 0;
+}
+
+static void ra_write(void *opaque, hwaddr offset,
+                       uint64_t value, unsigned size) {
+}
+
+
+static const MemoryRegionOps ra_ops = {
+    .read = ra_read,
+    .write = ra_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
+
 static const TypeInfo rf7fa_type = {
     .name = MACHINE_TYPE_NAME("ra2l1"),
     .parent = TYPE_MACHINE,
@@ -102,6 +121,11 @@ type_init(ra2l1_machine_init)
 
 static void ra_sys_instance_init(Object *obj) {
     ra_state *s = RA2L1_SYS(obj);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(s);
+
+    memory_region_init_io(&s->iomem, obj, &ra_ops, s, "mmio", 0x100000);
+    sysbus_init_mmio(sbd, &s->iomem);
+    sysbus_init_irq(sbd, &s->irq);
     s->sysclk = qdev_init_clock_out(DEVICE(s), "SYSCLK");
 }
 
