@@ -12,6 +12,8 @@
 #include "hw/qdev-clock.h"
 #include "hw/misc/unimp.h"
 
+#include "R7FA2L1AB.h"
+
 #define NUM_IRQ_LINES 32
 #define NUM_PRIO_BITS 3
 #define SYSCLK_FRQ 24000000ULL
@@ -26,10 +28,28 @@ typedef struct ra_state {
     MemoryRegion sram;
     MemoryRegion flash;
     MemoryRegion flash_alias;
+    MemoryRegion flash_io;
+    MemoryRegion mmio;
     qemu_irq irq;
     Clock *sysclk;
     Clock *refclk;
 }RA2L1State;
+
+static uint64_t ra2l1_flash_io_read(void *opaque, hwaddr, unsigned size);
+static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
+static uint64_t ra2l1_mmio_read(void *opaque, hwaddr, unsigned size);
+static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
+
+static MemoryRegionOps mmio_op = {
+    .read  = ra2l1_mmio_read,
+    .write = ra2l1_mmio_write,
+    .endianness = DEVICE_LITTLE_ENDIAN
+};
+static MemoryRegionOps flash_io_op = {
+    .read  = ra2l1_flash_io_read,
+    .write = ra2l1_flash_io_write,
+    .endianness = DEVICE_LITTLE_ENDIAN
+};
 
 static void ra2l1_soc_initfn(Object *obj)
 {   
@@ -45,7 +65,8 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
 {
     RA2L1State *s = RA2L1_SYS(dev_soc);
     DeviceState *armv7m;
-    
+    MemoryRegionOps *ops = &flash_io_op;
+    MemoryRegionOps *mmio_ops = &mmio_op;
     MemoryRegion *system_memory = get_system_memory();
 
     /* 
@@ -97,8 +118,30 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
         return;
     }
+
+    memory_region_init_io(&s->flash_io, OBJECT(dev_soc), ops, dev_soc, "ra2l1.flash_io", 0x20000);
+    memory_region_add_subregion(system_memory, 0x407E0000, &s->flash_io);
+
+    memory_region_init_io(&s->mmio, OBJECT(dev_soc), mmio_ops, dev_soc, "ra2l1.mmio", 0x100000);
+    memory_region_add_subregion(system_memory, 0x40000000, &s->mmio);
 }
 
+static uint64_t ra2l1_flash_io_read(void *opaque, hwaddr addr, unsigned size) {
+    return 0;
+}
+static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
+}
+
+static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
+    uint64_t a_addr = addr + 0x40000000;
+    if (a_addr == (uint64_t)&R_SYSTEM->OSCSF) {
+        // HOCOSF
+        return 1;
+    }
+    return 0;
+}
+static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
+}
 static void ra2l1_soc_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
