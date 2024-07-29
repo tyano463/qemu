@@ -7742,6 +7742,7 @@ static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
     uint32_t pc = dc->base.pc_next;
     unsigned int insn;
 
+g_print("pc:%x\n", pc);
     /* Singlestep exceptions have the highest priority. */
     if (arm_check_ss_active(dc)) {
         dc->base.pc_next = pc + 4;
@@ -7767,8 +7768,9 @@ static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
         return;
     }
 
-    dc->pc_curr = pc;
     insn = arm_ldl_code(env, &dc->base, pc, dc->sctlr_b);
+//g_print("pc:%x insn:%x\n", pc, insn);
+//fflush(stdout);
     dc->insn = insn;
     dc->base.pc_next = pc + 4;
     disas_arm_insn(dc, insn);
@@ -7839,6 +7841,7 @@ static void thumb_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
     /* Misaligned thumb PC is architecturally impossible. */
     assert((dc->base.pc_next & 1) == 0);
 
+g_print("pc:%x\n", pc);
     if (arm_check_ss_active(dc) || arm_check_kernelpage(dc)) {
         dc->base.pc_next = pc + 2;
         return;
