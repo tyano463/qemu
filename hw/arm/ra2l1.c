@@ -13,8 +13,10 @@
 #include "qapi/error.h"
 #include "qemu/datadir.h"
 #include "qemu/error-report.h"
+#include "qemu/thread.h"
 #include "qemu/units.h"
 #include "sysemu/sysemu.h"
+#include "target/arm/cpu.h"
 
 #include "R7FA2L1AB.h"
 #include "renesas_common.h"
@@ -37,7 +39,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(ra_uart, RA2L1_UART)
 typedef struct ra_uart {
     SysBusDevice parent;
     CharBackend chr;
-    qemu_irq irq;
+    qemu_irq irq_txi;
+    qemu_irq irq_tei;
+    qemu_irq irq_rxi;
 } RA2L1UartState;
 
 typedef struct ra_state {
@@ -53,6 +57,7 @@ typedef struct ra_state {
     RA2L1UartState uart[RA2L1_UART_NUM];
     Clock *sysclk;
     Clock *refclk;
+    QemuMutex lock;
 } RA2L1State;
 
 static uint64_t ra2l1_flash_io_read(void *opaque, hwaddr, unsigned size);
@@ -63,6 +68,7 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
                              unsigned size);
 static void uart_write(void *opaque, int kind, uint8_t data);
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m);
+static void uart_receive(char *s, int n);
 
 static MemoryRegionOps mmio_op = {.read = ra2l1_mmio_read,
                                   .write = ra2l1_mmio_write,
@@ -71,7 +77,11 @@ static MemoryRegionOps flash_io_op = {.read = ra2l1_flash_io_read,
                                       .write = ra2l1_flash_io_write,
                                       .endianness = DEVICE_LITTLE_ENDIAN};
 
+static RA2L1State *g_state;
 static uint64_t lp_fstatr1 = 0;
+static uint8_t *uart_rbuf;
+static uint8_t uart_rindex;
+static uint8_t uart_rlen;
 static uint8_t **uart_wbuf;
 static uint16_t *uart_windex;
 
@@ -91,6 +101,7 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     MemoryRegionOps *mmio_ops = &mmio_op;
     MemoryRegion *system_memory = get_system_memory();
 
+    g_state = s;
     /*
      * We use s->refclk internally and only define it with qdev_init_clock_in()
      * so it is correctly parented and not leaked on an init/deinit; it is not
@@ -156,6 +167,11 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
 
     uart_wbuf = MALLOC2d(uint8_t, 1024, 10);
     uart_windex = calloc(sizeof(uint16_t) * 10, 1);
+
+    uart_rbuf = malloc(1024);
+    uart_rindex = 0;
+    uart_rlen = 0;
+    qemu_mutex_init(&s->lock);
 }
 
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
@@ -164,7 +180,12 @@ static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
     Error *errp = NULL;
     int i;
     SysBusDevice *busdev;
-    int irqnum[] = {2, -1, 6, -1, -1, -1, -1, -1, -1, 14};
+    struct {
+        int txi;
+        int tei;
+        int rxi;
+    } irqnum[] = {{1, 2, 8}, {-1}, {5, 6, 8}, {-1}, {-1},
+                  {-1},      {-1}, {-1},      {-1}, {13, 14, 12}};
 
     // dlog("IN s:%p ds:%p a:%p", s, dev_soc, armv7m);
 
@@ -182,8 +203,14 @@ static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
         }
         busdev = SYS_BUS_DEVICE(dev);
 
-        if (irqnum[i] != -1)
-            sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, irqnum[i]));
+        if (irqnum[i].txi != -1) {
+            sysbus_connect_irq(busdev, 0,
+                               qdev_get_gpio_in(armv7m, irqnum[i].txi));
+            sysbus_connect_irq(busdev, 1,
+                               qdev_get_gpio_in(armv7m, irqnum[i].tei));
+            sysbus_connect_irq(busdev, 2,
+                               qdev_get_gpio_in(armv7m, irqnum[i].rxi));
+        }
     }
     // dlog("OUT");
 }
@@ -216,7 +243,7 @@ static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value,
     //    g_print("fwrite %lx\n", addr);
     switch (a_addr) {
     case (uint64_t)&R_FACI_LP->FCR:
-        g_print("%lx <- %lx\n", a_addr, value);
+//        g_print("%lx <- %lx\n", a_addr, value);
         if (value)
             lp_fstatr1 = 0x40;
         else
@@ -233,6 +260,7 @@ static uint64_t rtc_rcr2 = 0x40;
  * 0x40000000 - 0x40100000
  */
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
+    RA2L1State *s = opaque;
     uint64_t a_addr = addr + 0x40000000;
     uint64_t value = 0;
     //    g_print("read %lx\n", a_addr);
@@ -254,6 +282,20 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
         break;
     case (uint64_t)&R_RTC->RCR2:
         value = rtc_rcr2;
+        break;
+    case (uint64_t)&R_SCI0->RDR:
+        if (uart_rindex < uart_rlen) {
+            value = uart_rbuf[uart_rindex++];
+            if (uart_rindex == uart_rlen) {
+                uart_rlen = 0;
+                uart_rindex = 0;
+                qemu_set_irq(s->uart[0].irq_rxi, 0);
+            }
+        } else {
+            uart_rlen = 0;
+            uart_rindex = 0;
+            qemu_set_irq(s->uart[0].irq_rxi, 0);
+        }
         break;
     }
     return value;
@@ -287,16 +329,60 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
+static void rchomp(char * s) {
+    int i;
+    int len = strlen(s);
+    int found = -1;
+    for(i=len -1;i;i--) {
+        switch(s[i]) {
+            case '\r':
+            case '\n':
+                break;
+            default:
+                found = i;
+        }
+        if (found != -1) break;
+    }
+
+    if (found == -1) return;
+
+    s[found + 1] = '\n';
+    s[found + 2] = '\0';
+}
+
+static void uart_receive(char *s, int n) {
+//    CPUState *cpu = CPU(ARM_CPU(first_cpu));
+//    qemu_mutex_lock__raw(&g_state->lock);
+    memcpy(&uart_rbuf[uart_rindex], s, n);
+    if (n) {
+        if (n == 1 && s[0] < 0x20) {
+        } else {
+            rchomp(s);
+            g_print("uart received(%d): %s", n, s);
+        }
+    }
+    uart_rlen += n;
+    qemu_set_irq(g_state->uart[0].irq_rxi, 1);
+//    cpu_interrupt(cpu, CPU_INTERRUPT_HARD);
+//    qemu_set_irq(g_state->uart[0].irq_rxi, 0);
+//    qemu_mutex_unlock(&g_state->lock);
+}
 static void uart_write(void *opaque, int kind, uint8_t data) {
     RA2L1State *s = opaque;
 
     // g_print("%p k:%d %c\n", opaque, kind, data);
     uart_wbuf[kind][uart_windex[kind]++] = data;
     if (data == '\n') {
-        g_print("%s", uart_wbuf[kind]);
+        uart_wbuf[kind][uart_windex[kind]++] = '\0';
+        if (kind == 0) {
+            im920_write((char*)uart_wbuf[0], strlen((char*)uart_wbuf[0]));
+            g_print("to 920 %s", uart_wbuf[kind]);
+        } else if (kind == 9) {
+            g_print("%s", uart_wbuf[kind]);
+        }
         uart_windex[kind] = 0;
     }
-    qemu_irq_pulse(s->uart[kind].irq);
+    qemu_irq_pulse(s->uart[kind].irq_tei);
 }
 
 static Property ra2l1_uart_properties[] = {
@@ -320,7 +406,9 @@ static void ra2l1_uart_receive(void *opaque, const uint8_t *buf, int size) {
 static void ra2l1_uart_init(Object *obj) {
     RA2L1UartState *s = RA2L1_UART(obj);
 
-    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_txi);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_tei);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_rxi);
 }
 
 static void ra2l1_uart_reset(DeviceState *dev) {}
@@ -387,6 +475,7 @@ type_init(ra2l1_soc_types)
 
     armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0,
                        0x20000);
+    im920_init(uart_receive);
 }
 
 static void ra2l1_machine_init(MachineClass *mc) {
