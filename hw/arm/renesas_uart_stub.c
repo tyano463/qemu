@@ -13,6 +13,8 @@
 
 static void configure_serial_port(int fd);
 static void *ble_receive_main(void *arg);
+void im920_init(void (*received)(char *, int));
+void im920_write(char *, int);
 
 static void (*rx_callback)(char *, int);
 static pthread_t th;

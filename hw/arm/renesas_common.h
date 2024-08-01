@@ -31,6 +31,8 @@
         }                                                                      \
     } while (0)
 
-void im920_init(void (*received)(char *, int));
-void im920_write(char *, int);
+#define U32(v) ((v) & (~(uint32_t)0))
+
+char *b2s(uint8_t *data, int n);
+
 #endif

@@ -19,10 +19,12 @@
 #include "target/arm/cpu.h"
 
 #include "R7FA2L1AB.h"
+#include "ra2l1_sc324_aes.h"
 #include "renesas_common.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
 
 #define NUM_IRQ_LINES 32
 #define NUM_PRIO_BITS 3
@@ -70,6 +72,9 @@ static void uart_write(void *opaque, int kind, uint8_t data);
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m);
 static void uart_receive(char *s, int n);
 
+void im920_init(void (*received)(char *, int));
+void im920_write(char *, int);
+
 static MemoryRegionOps mmio_op = {.read = ra2l1_mmio_read,
                                   .write = ra2l1_mmio_write,
                                   .endianness = DEVICE_LITTLE_ENDIAN};
@@ -80,8 +85,8 @@ static MemoryRegionOps flash_io_op = {.read = ra2l1_flash_io_read,
 static RA2L1State *g_state;
 static uint64_t lp_fstatr1 = 0;
 static uint8_t *uart_rbuf;
-static uint8_t uart_rindex;
-static uint8_t uart_rlen;
+static uint16_t uart_rindex;
+static uint16_t uart_rlen;
 static uint8_t **uart_wbuf;
 static uint16_t *uart_windex;
 
@@ -243,7 +248,7 @@ static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value,
     //    g_print("fwrite %lx\n", addr);
     switch (a_addr) {
     case (uint64_t)&R_FACI_LP->FCR:
-//        g_print("%lx <- %lx\n", a_addr, value);
+        //        g_print("%lx <- %lx\n", a_addr, value);
         if (value)
             lp_fstatr1 = 0x40;
         else
@@ -255,7 +260,7 @@ static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value,
 static uint64_t mosccr = 1;
 static uint64_t can_str = 0x100;
 static uint64_t rtc_rcr2 = 0x40;
-
+static hwaddr bef;
 /**
  * 0x40000000 - 0x40100000
  */
@@ -263,7 +268,14 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
     RA2L1State *s = opaque;
     uint64_t a_addr = addr + 0x40000000;
     uint64_t value = 0;
-    //    g_print("read %lx\n", a_addr);
+    // if (bef != a_addr) {
+        // g_print("read %lx\n", a_addr);
+        // bef = a_addr;
+    // }
+    if (is_aes(a_addr)) {
+        value = ra2l1_mmio_aes_read(opaque, a_addr, size);
+        goto end;
+    }
     switch (a_addr) {
     case (uint64_t)&R_SYSTEM->OSCSF:
         // g_print("OSCSF\n");
@@ -298,6 +310,7 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
         }
         break;
     }
+end:
     return value;
 }
 
@@ -307,6 +320,11 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
 static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
                              unsigned size) {
     uint64_t a_addr = addr + 0x40000000;
+    if (is_aes(a_addr)) {
+        ra2l1_mmio_aes_write(opaque, a_addr, value, size);
+        return;
+    }
+
     switch (a_addr) {
     case (uint64_t)&R_SYSTEM->MOSCCR:
         mosccr = value;
@@ -329,43 +347,45 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
-static void rchomp(char * s) {
+static void rchomp(char *s) {
     int i;
     int len = strlen(s);
     int found = -1;
-    for(i=len -1;i;i--) {
-        switch(s[i]) {
-            case '\r':
-            case '\n':
-                break;
-            default:
-                found = i;
+    for (i = len - 1; i; i--) {
+        switch (s[i]) {
+        case '\r':
+        case '\n':
+            break;
+        default:
+            found = i;
         }
-        if (found != -1) break;
+        if (found != -1)
+            break;
     }
 
-    if (found == -1) return;
+    if (found == -1)
+        return;
 
     s[found + 1] = '\n';
     s[found + 2] = '\0';
 }
 
+
 static void uart_receive(char *s, int n) {
-//    CPUState *cpu = CPU(ARM_CPU(first_cpu));
-//    qemu_mutex_lock__raw(&g_state->lock);
-    memcpy(&uart_rbuf[uart_rindex], s, n);
+    uint16_t st = uart_rlen;
+    memcpy(&uart_rbuf[uart_rlen], s, n);
     if (n) {
+        uart_rlen += n;
+        uart_rbuf[uart_rlen] = '\0';
+        if (uart_rbuf[uart_rlen - 1] == 0xa) {
+            qemu_set_irq(g_state->uart[0].irq_rxi, 1);
+        }
         if (n == 1 && s[0] < 0x20) {
         } else {
-            rchomp(s);
-            g_print("uart received(%d): %s", n, s);
+            g_print("uart received(%d):%d %s\n%s", n, st,
+                    b2s((uint8_t *)&uart_rbuf[st], n), &uart_rbuf[st]);
         }
     }
-    uart_rlen += n;
-    qemu_set_irq(g_state->uart[0].irq_rxi, 1);
-//    cpu_interrupt(cpu, CPU_INTERRUPT_HARD);
-//    qemu_set_irq(g_state->uart[0].irq_rxi, 0);
-//    qemu_mutex_unlock(&g_state->lock);
 }
 static void uart_write(void *opaque, int kind, uint8_t data) {
     RA2L1State *s = opaque;
@@ -375,7 +395,7 @@ static void uart_write(void *opaque, int kind, uint8_t data) {
     if (data == '\n') {
         uart_wbuf[kind][uart_windex[kind]++] = '\0';
         if (kind == 0) {
-            im920_write((char*)uart_wbuf[0], strlen((char*)uart_wbuf[0]));
+            im920_write((char *)uart_wbuf[0], strlen((char *)uart_wbuf[0]));
             g_print("to 920 %s", uart_wbuf[kind]);
         } else if (kind == 9) {
             g_print("%s", uart_wbuf[kind]);

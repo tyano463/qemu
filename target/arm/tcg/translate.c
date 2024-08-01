@@ -7742,7 +7742,6 @@ static void arm_tr_translate_insn(DisasContextBase *dcbase, CPUState *cpu)
     uint32_t pc = dc->base.pc_next;
     unsigned int insn;
 
-g_print("pc:%x\n", pc);
     /* Singlestep exceptions have the highest priority. */
     if (arm_check_ss_active(dc)) {
         dc->base.pc_next = pc + 4;
@@ -7768,9 +7767,8 @@ g_print("pc:%x\n", pc);
         return;
     }
 
+    dc->pc_curr = pc;
     insn = arm_ldl_code(env, &dc->base, pc, dc->sctlr_b);
-//g_print("pc:%x insn:%x\n", pc, insn);
-//fflush(stdout);
     dc->insn = insn;
     dc->base.pc_next = pc + 4;
     disas_arm_insn(dc, insn);
