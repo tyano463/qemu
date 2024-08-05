@@ -19,6 +19,9 @@
 #include "target/arm/cpu.h"
 
 #include "R7FA2L1AB.h"
+#include "ra2l1.h"
+#include "ra2l1_agt.h"
+#include "ra2l1_flash.h"
 #include "ra2l1_sc324_aes.h"
 #include "renesas_common.h"
 
@@ -29,7 +32,6 @@
 #define NUM_IRQ_LINES 32
 #define NUM_PRIO_BITS 3
 #define SYSCLK_FRQ 24000000ULL
-#define RA2L1_UART_NUM 10
 
 #define TYPE_RA2L1_SYS "ra2l1-sys"
 #define TYPE_RA2L1_UART "ra2l1-uart"
@@ -38,33 +40,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(ra_state, RA2L1_SYS)
 
 OBJECT_DECLARE_SIMPLE_TYPE(ra_uart, RA2L1_UART)
 
-typedef struct ra_uart {
-    SysBusDevice parent;
-    CharBackend chr;
-    qemu_irq irq_txi;
-    qemu_irq irq_tei;
-    qemu_irq irq_rxi;
-} RA2L1UartState;
-
-typedef struct ra_state {
-    SysBusDevice parent_obj;
-    ARMv7MState armv7m;
-    MemoryRegion iomem;
-    MemoryRegion sram;
-    MemoryRegion flash;
-    MemoryRegion dflash;
-    MemoryRegion flash_alias;
-    MemoryRegion flash_io;
-    MemoryRegion mmio;
-    RA2L1UartState uart[RA2L1_UART_NUM];
-    Clock *sysclk;
-    Clock *refclk;
-    QemuMutex lock;
-} RA2L1State;
-
-static uint64_t ra2l1_flash_io_read(void *opaque, hwaddr, unsigned size);
-static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value,
-                                 unsigned size);
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr, unsigned size);
 static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
                              unsigned size);
@@ -78,12 +53,14 @@ void im920_write(char *, int);
 static MemoryRegionOps mmio_op = {.read = ra2l1_mmio_read,
                                   .write = ra2l1_mmio_write,
                                   .endianness = DEVICE_LITTLE_ENDIAN};
-static MemoryRegionOps flash_io_op = {.read = ra2l1_flash_io_read,
-                                      .write = ra2l1_flash_io_write,
+static MemoryRegionOps flash_io_op = {.read = ra2l1_mmio_flash_read,
+                                      .write = ra2l1_mmio_flash_write,
                                       .endianness = DEVICE_LITTLE_ENDIAN};
+static MemoryRegionOps dflash_op = {.read = ra2l1_dflash_read,
+                                    .write = ra2l1_dflash_write,
+                                    .endianness = DEVICE_LITTLE_ENDIAN};
 
 static RA2L1State *g_state;
-static uint64_t lp_fstatr1 = 0;
 static uint8_t *uart_rbuf;
 static uint16_t uart_rindex;
 static uint16_t uart_rlen;
@@ -97,15 +74,20 @@ static void ra2l1_soc_initfn(Object *obj) {
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
     s->refclk = qdev_init_clock_in(DEVICE(s), "refclk", NULL, NULL, 0);
+
+    dlog("obj:%p", obj);
+    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_agt);
 }
 
 static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     RA2L1State *s = RA2L1_SYS(dev_soc);
     DeviceState *armv7m;
     MemoryRegionOps *ops = &flash_io_op;
+    MemoryRegionOps *dflash_ops = &dflash_op;
     MemoryRegionOps *mmio_ops = &mmio_op;
     MemoryRegion *system_memory = get_system_memory();
 
+    dlog("dev_soc:%p s:%p", dev_soc, s);
     g_state = s;
     /*
      * We use s->refclk internally and only define it with qdev_init_clock_in()
@@ -138,9 +120,10 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     memory_region_add_subregion(system_memory, 0, &s->flash);
     memory_region_add_subregion(system_memory, 0, &s->flash_alias);
 
-    memory_region_init_rom(&s->dflash, OBJECT(dev_soc), "ra2l1.dflash", 0x2000,
-                           &error_fatal);
-    memory_region_add_subregion(system_memory, 0x40100000, &s->dflash);
+    memory_region_init_io(&s->dflash, OBJECT(dev_soc), dflash_ops, dev_soc,
+                          "ra2l1.dflash", 0x2000);
+    memory_region_add_subregion(system_memory, FLASH_LP_DF_START_ADDRESS,
+                                &s->dflash);
 
     /* Init SRAM region */
     memory_region_init_ram(&s->sram, NULL, "ra2l1.sram", 0x8000, &error_fatal);
@@ -217,44 +200,9 @@ static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
                                qdev_get_gpio_in(armv7m, irqnum[i].rxi));
         }
     }
-    // dlog("OUT");
-}
 
-static uint64_t frbef = 0;
-/**
- * 0x407E0000 - 0x40800000
- */
-static uint64_t ra2l1_flash_io_read(void *opaque, hwaddr addr, unsigned size) {
-    uint64_t value = 0;
-    uint64_t a_addr = addr | 0x407E0000;
-    switch (a_addr) {
-    case (uint64_t)&R_FACI_LP->FSTATR1:
-        //            if (frbef != a_addr) {
-        //                g_print("lp_fstatr1:%lx\n", lp_fstatr1);
-        //            }
-        value = lp_fstatr1 ^= 0x40;
-        break;
-    }
-    frbef = a_addr;
-    return value;
-}
-
-/**
- * 0x407E0000 - 0x40800000
- */
-static void ra2l1_flash_io_write(void *opaque, hwaddr addr, uint64_t value,
-                                 unsigned size) {
-    uint64_t a_addr = addr | 0x40000000;
-    //    g_print("fwrite %lx\n", addr);
-    switch (a_addr) {
-    case (uint64_t)&R_FACI_LP->FCR:
-        //        g_print("%lx <- %lx\n", a_addr, value);
-        if (value)
-            lp_fstatr1 = 0x40;
-        else
-            lp_fstatr1 = 0;
-        break;
-    }
+    // Timer
+    sysbus_connect_irq(SYS_BUS_DEVICE(dev_soc), 0, qdev_get_gpio_in(armv7m, 3));
 }
 
 static uint64_t mosccr = 1;
@@ -269,13 +217,17 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
     uint64_t a_addr = addr + 0x40000000;
     uint64_t value = 0;
     // if (bef != a_addr) {
-        // g_print("read %lx\n", a_addr);
-        // bef = a_addr;
+    // g_print("read %lx\n", a_addr);
+    // bef = a_addr;
     // }
     if (is_aes(a_addr)) {
         value = ra2l1_mmio_aes_read(opaque, a_addr, size);
         goto end;
+    } else if (is_agt(a_addr)) {
+        value = ra2l1_mmio_agt_read(opaque, a_addr, size);
+        goto end;
     }
+
     switch (a_addr) {
     case (uint64_t)&R_SYSTEM->OSCSF:
         // g_print("OSCSF\n");
@@ -322,7 +274,10 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
     uint64_t a_addr = addr + 0x40000000;
     if (is_aes(a_addr)) {
         ra2l1_mmio_aes_write(opaque, a_addr, value, size);
-        return;
+        goto end;
+    } else if (is_agt(a_addr)) {
+        ra2l1_mmio_agt_write(opaque, a_addr, value, size);
+        goto end;
     }
 
     switch (a_addr) {
@@ -345,6 +300,8 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
         uart_write(opaque, 9, value & 0xff);
         break;
     }
+end:
+    return;
 }
 
 static void rchomp(char *s) {
@@ -369,7 +326,6 @@ static void rchomp(char *s) {
     s[found + 1] = '\n';
     s[found + 2] = '\0';
 }
-
 
 static void uart_receive(char *s, int n) {
     uint16_t st = uart_rlen;
