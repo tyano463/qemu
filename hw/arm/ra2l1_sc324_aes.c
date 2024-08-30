@@ -295,6 +295,7 @@ static void inv_cipher(const uint8_t *in /*4*Nb*/, uint8_t *out /*4*Nb*/,
     add_round_key(state, &w[0]);
 }
 
+static int deccount = 0;
 static void proc(void) {
     int i;
     uint32_t w[Nb * (NR_MAX + 1)];
@@ -302,8 +303,10 @@ static void proc(void) {
 
     uint32_t mode = AES_MODE;
     uint8_t src[BLOCK_LENGTH];
+    if (deccount < 2) {
+        dlog("flg:%d md:%d", AES_ENCRYPT_FLAG, mode);
+    }
 
-    // dlog("flg:%d md:%d", AES_ENCRYPT_FLAG, mode);
     if (AES_ENCRYPT_FLAG == SC324_AES_ENCRYPT) {
         switch (mode) {
         case SC324_AES_CBC:
@@ -328,10 +331,20 @@ static void proc(void) {
         switch (mode) {
         case SC324_AES_CBC:
             inv_cipher((uint8_t *)in, src, w);
+            if (deccount < 2) {
+                dlog("iv:%s", b2s((uint8_t *)iv, 16));
+                dlog("key:%s", b2s((uint8_t *)key, 16));
+                dlog("in:%s", b2s((uint8_t *)in, 16));
+                dlog("out:%s", b2s((uint8_t *)src, 16));
+            }
             for (i = 0; i < BLOCK_LENGTH; i++) {
-                out[i] = iv[i] ^ src[i];
+                ((uint8_t*)out)[i] = ((uint8_t*)iv)[i] ^ src[i];
+            }
+            if (deccount < 2) {
+                dlog("out:%s", b2s((uint8_t *)out, 16));
             }
             memcpy(iv, in, 16);
+            deccount++;
             break;
         case SC324_AES_ECB:
             inv_cipher((uint8_t *)in, (uint8_t *)out, w);
@@ -377,6 +390,7 @@ void ra2l1_mmio_aes_write(void *opaque, hwaddr addr, uint64_t value,
         break;
     case (uint64_t)&R_AES->AESCMD:
         aescmd |= U32(value);
+        dlog("aescmd:%x", aescmd);
         break;
     case (uint64_t)&R_AES->AESKW0:
         key[dindex++] = __builtin_bswap32(U32(value));

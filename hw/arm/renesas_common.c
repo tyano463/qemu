@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include "renesas_common.h"
 
-static char debug_str[0x200];
+static char debug_str[0x400];
 static char b2c(uint8_t b) {
     if (b < 10) {
         return '0' + b;

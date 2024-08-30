@@ -67,6 +67,7 @@ static void *timer_main(void *arg) {
         nanosleep(&interval, NULL);
         qemu_irq_pulse(s->irq_agt);
         if (tmod != 1) {
+            dlog("timer stopped");
             running = false;
         }
     }
@@ -99,6 +100,7 @@ static void setmode(uint64_t value, int kind) {
         dr = value & 7;
     } else {
         tmod = value & 7;
+        dlog("update tmod:%x", tmod);
         tck = (value & 0x70) >> 4;
     }
 }
