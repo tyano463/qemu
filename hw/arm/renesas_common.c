@@ -1,4 +1,6 @@
-#include <stdint.h>
+#include "qemu/osdep.h"
+
+#include "ra2l1.h"
 #include "renesas_common.h"
 
 static char debug_str[0x400];

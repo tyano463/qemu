@@ -33,11 +33,11 @@
 #define NUM_PRIO_BITS 3
 #define SYSCLK_FRQ 24000000ULL
 
+#define PERIPHERAL_BASE R_MPU_MMPU_BASE
 #define TYPE_RA2L1_SYS "ra2l1-sys"
 #define TYPE_RA2L1_UART "ra2l1-uart"
 
 OBJECT_DECLARE_SIMPLE_TYPE(ra_state, RA2L1_SYS)
-
 OBJECT_DECLARE_SIMPLE_TYPE(ra_uart, RA2L1_UART)
 
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr, unsigned size);
@@ -45,7 +45,7 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
                              unsigned size);
 static void uart_write(void *opaque, int kind, uint8_t data);
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m);
-static void uart_receive(char *s, int n);
+static void uart_receive(int channel, const char *s, ssize_t n);
 
 void im920_init(void (*received)(char *, int));
 void im920_write(char *, int);
@@ -61,9 +61,9 @@ static MemoryRegionOps dflash_op = {.read = ra2l1_dflash_read,
                                     .endianness = DEVICE_LITTLE_ENDIAN};
 
 static RA2L1State *g_state;
-static uint8_t *uart_rbuf;
-static uint16_t uart_rindex;
-static uint16_t uart_rlen;
+static uint8_t **uart_rbuf;
+static uint16_t uart_rindex[RA2L1_UART_NUM] = {0};
+static uint16_t uart_rlen[RA2L1_UART_NUM] = {0};
 static uint8_t **uart_wbuf;
 static uint16_t *uart_windex;
 
@@ -150,15 +150,19 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     memory_region_add_subregion(system_memory, 0x407E0000, &s->flash_io);
 
     memory_region_init_io(&s->mmio, OBJECT(dev_soc), mmio_ops, dev_soc,
-                          "ra2l1.mmio", 0x100000);
-    memory_region_add_subregion(system_memory, 0x40000000, &s->mmio);
+                          "ra2l1.mmio", (intptr_t)R_AES - PERIPHERAL_BASE);
+    memory_region_add_subregion(system_memory, PERIPHERAL_BASE, &s->mmio);
+
+    s->aes = renesas_aes_init(system_memory, dev_soc, (intptr_t)R_AES);
 
     uart_wbuf = MALLOC2d(uint8_t, 1024, 10);
     uart_windex = calloc(sizeof(uint16_t) * 10, 1);
 
-    uart_rbuf = malloc(1024);
-    uart_rindex = 0;
-    uart_rlen = 0;
+    uart_rbuf =
+        malloc(0x400 * RA2L1_UART_NUM + sizeof(uint8_t *) * RA2L1_UART_NUM);
+    for (int i = 0; i < RA2L1_UART_NUM; i++) {
+        uart_rbuf[i] = ((uint8_t *)&uart_rbuf[RA2L1_UART_NUM]) + 0x400 * i;
+    }
     qemu_mutex_init(&s->lock);
 }
 
@@ -172,8 +176,8 @@ static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
         int txi;
         int tei;
         int rxi;
-    } irqnum[] = {{1, 2, 8}, {-1}, {5, 6, 8}, {-1}, {-1},
-                  {-1},      {-1}, {-1},      {-1}, {13, 14, 12}};
+    } irqnum[] = {{5, 6, 4}, {-1}, {5, 6, 8}, {-1}, {-1},
+                  {-1},      {-1}, {-1},      {-1}, {5, 6, 4}};
 
     // dlog("IN s:%p ds:%p a:%p", s, dev_soc, armv7m);
 
@@ -216,14 +220,9 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
     RA2L1State *s = opaque;
     uint64_t a_addr = addr + 0x40000000;
     uint64_t value = 0;
-    // if (bef != a_addr) {
-    // g_print("read %lx\n", a_addr);
-    // bef = a_addr;
-    // }
-    if (is_aes(a_addr)) {
-        value = ra2l1_mmio_aes_read(opaque, a_addr, size);
-        goto end;
-    } else if (is_agt(a_addr)) {
+    int channel = -1;
+
+    if (is_agt(a_addr)) {
         value = ra2l1_mmio_agt_read(opaque, a_addr, size);
         goto end;
     }
@@ -248,17 +247,26 @@ static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
         value = rtc_rcr2;
         break;
     case (uint64_t)&R_SCI0->RDR:
-        if (uart_rindex < uart_rlen) {
-            value = uart_rbuf[uart_rindex++];
-            if (uart_rindex == uart_rlen) {
-                uart_rlen = 0;
-                uart_rindex = 0;
-                qemu_set_irq(s->uart[0].irq_rxi, 0);
+        channel = 0;
+        // fall through
+    case (uint64_t)&R_SCI1->RDR:
+        if (channel < 0)
+            channel = 1;
+        // fall through
+    case (uint64_t)&R_SCI9->RDR:
+        if (channel < 0)
+            channel = 9;
+        if (uart_rindex[channel] < uart_rlen[channel]) {
+            value = uart_rbuf[channel][uart_rindex[channel]++];
+            if (uart_rindex[channel] == uart_rlen[channel]) {
+                uart_rlen[channel] = 0;
+                uart_rindex[channel] = 0;
+                qemu_set_irq(s->uart[channel].irq_rxi, 0);
             }
         } else {
-            uart_rlen = 0;
-            uart_rindex = 0;
-            qemu_set_irq(s->uart[0].irq_rxi, 0);
+            uart_rlen[channel] = 0;
+            uart_rindex[channel] = 0;
+            qemu_set_irq(s->uart[channel].irq_rxi, 0);
         }
         break;
     }
@@ -266,12 +274,16 @@ end:
     return value;
 }
 
+static uint64_t scr[RA2L1_UART_NUM];
 /**
  * 0x40000000 - 0x40100000
  */
 static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
                              unsigned size) {
     uint64_t a_addr = addr + 0x40000000;
+    RA2L1State *s = opaque;
+    int channel = -1;
+
     if (is_aes(a_addr)) {
         ra2l1_mmio_aes_write(opaque, a_addr, value, size);
         goto end;
@@ -294,10 +306,21 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
         rtc_rcr2 = (rtc_rcr2 & 0xfffffffe) | (value & 1);
         break;
     case (uint64_t)&R_SCI0->TDR:
-        uart_write(opaque, 0, value & 0xff);
-        break;
+        channel = 0;
+        // fall through
     case (uint64_t)&R_SCI9->TDR:
-        uart_write(opaque, 9, value & 0xff);
+        if (channel < 0)
+            channel = 9;
+        uart_write(opaque, channel, value & 0xff);
+        break;
+    case (uint64_t)&R_SCI0->SCR:
+        channel = 0;
+        // fall through
+    case (uint64_t)&R_SCI9->SCR:
+        if ((scr[channel] & SCI_SCR_TIE_MASK) && (!(value & SCI_SCR_TIE_MASK))) {
+            qemu_irq_pulse(s->uart[channel].irq_tei);
+        }
+        scr[channel] = value;
         break;
     }
 end:
@@ -327,24 +350,49 @@ static void rchomp(char *s) {
     s[found + 2] = '\0';
 }
 
-static void uart_receive(char *s, int n) {
-    uint16_t st = uart_rlen;
-    memcpy(&uart_rbuf[uart_rlen], s, n);
+static void uart_receive(int channel, const char *s, ssize_t n) {
+    uint16_t st = uart_rlen[channel];
+    memcpy(&uart_rbuf[channel][uart_rlen[channel]], s, n);
     if (n) {
-        uart_rlen += n;
-        uart_rbuf[uart_rlen] = '\0';
-        if (uart_rbuf[uart_rlen - 1] == 0xa) {
-            qemu_set_irq(g_state->uart[0].irq_rxi, 1);
+        uart_rlen[channel] += n;
+        uart_rbuf[channel][uart_rlen[channel]] = '\0';
+        char c = uart_rbuf[channel][uart_rlen[channel] - 1];
+        if (c == ASCII_CODE_CR || c == ASCII_CODE_LF) {
+            struct IRQState {
+                Object parent_obj;
+
+                qemu_irq_handler handler;
+                void *opaque;
+                int n;
+            };
+            // ルネサスのevkサンプルがCRのみ対象にしているため
+            uart_rbuf[channel][uart_rlen[channel] - 1] = ASCII_CODE_CR;
+            struct IRQState *irq =
+                (struct IRQState *)g_state->uart[channel].irq_rxi;
+            g_print("irq set %d\n", irq->n);
+            qemu_set_irq(g_state->uart[channel].irq_rxi, 1);
         }
         if (n == 1 && s[0] < 0x20) {
         } else {
-            g_print("uart received(%d):%d %s\n%s", n, st,
-                    b2s((uint8_t *)&uart_rbuf[st], n), &uart_rbuf[st]);
+            g_print("uart received(%ld):%d %s\n%s", n, st,
+                    b2s((uint8_t *)&uart_rbuf[channel][st], n),
+                    &uart_rbuf[channel][st]);
         }
     }
 }
 static void uart_write(void *opaque, int kind, uint8_t data) {
     RA2L1State *s = opaque;
+
+    if (kind == 0)
+        return;
+
+    // ルネサスのevkのサンプルがCRのみをチェックしているため
+    if (data == ASCII_CODE_LF)
+        data = ASCII_CODE_CR;
+    local_uart_write(kind, (const char *)&data, 1);
+    if (scr[kind] & SCI_SCR_TIE_MASK)
+        qemu_irq_pulse(s->uart[kind].irq_txi);
+    return;
 
     // g_print("%p k:%d %c\n", opaque, kind, data);
     uart_wbuf[kind][uart_windex[kind]++] = data;
@@ -373,6 +421,7 @@ static int ra2l1_uart_can_receive(void *opaque) {
 
     return 0;
 }
+
 static void ra2l1_uart_receive(void *opaque, const uint8_t *buf, int size) {
     RA2L1UartState *s = opaque;
 
@@ -434,9 +483,9 @@ static const TypeInfo ra2l1_soc_info = {
 
 static void ra2l1_soc_types(void) { type_register_static(&ra2l1_soc_info); }
 
-type_init(ra2l1_soc_types)
+type_init(ra2l1_soc_types);
 
-    static void ra2l1_init(MachineState *machine) {
+static void ra2l1_init(MachineState *machine) {
     DeviceState *dev;
     Clock *sysclk;
 
@@ -451,7 +500,9 @@ type_init(ra2l1_soc_types)
 
     armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0,
                        0x20000);
-    im920_init(uart_receive);
+
+    local_uart_init(RA2L1_SYS(dev), 0, uart_receive);
+    local_uart_init(RA2L1_SYS(dev), 9, uart_receive);
 }
 
 static void ra2l1_machine_init(MachineClass *mc) {

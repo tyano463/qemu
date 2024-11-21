@@ -50,13 +50,13 @@ void im920_init(void (*received)(char *, int)) {
     rx_callback = received;
 
     fd = open(DEVICE, O_RDWR | O_NOCTTY | O_NDELAY);
-    ERRRET(fd == -1, "open_port: Unable to open " DEVICE);
+    ERR_RET(fd == -1, "open_port: Unable to open " DEVICE);
 
     configure_serial_port(fd);
 
     running = 1;
     ret = pthread_create(&th, NULL, ble_receive_main, NULL);
-    ERRRET(ret != 0, "pthread_create error");
+    ERR_RET(ret != 0, "pthread_create error");
 
 error_return:
     return;

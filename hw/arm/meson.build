@@ -66,6 +66,7 @@ arm_ss.add(when: 'CONFIG_RA2L1', if_true: files(
   'ra2l1_agt.c',
   'ra2l1_flash.c',
   'ra2l1_sc324_aes.c',
+  'renesas_uart.c',
   'renesas_uart_stub.c'))
 
 system_ss.add(when: 'CONFIG_ARM_SMMUV3', if_true: files('smmu-common.c'))

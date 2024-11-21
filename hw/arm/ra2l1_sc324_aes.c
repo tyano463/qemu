@@ -1,5 +1,7 @@
 #include "qemu/osdep.h"
 
+#include "hw/boards.h"
+
 #include "R7FA2L1AB.h"
 #include "ra2l1_sc324_aes.h"
 #include "renesas_common.h"
@@ -338,7 +340,7 @@ static void proc(void) {
                 dlog("out:%s", b2s((uint8_t *)src, 16));
             }
             for (i = 0; i < BLOCK_LENGTH; i++) {
-                ((uint8_t*)out)[i] = ((uint8_t*)iv)[i] ^ src[i];
+                ((uint8_t *)out)[i] = ((uint8_t *)iv)[i] ^ src[i];
             }
             if (deccount < 2) {
                 dlog("out:%s", b2s((uint8_t *)out, 16));
@@ -360,8 +362,9 @@ bool is_aes(hwaddr addr) {
 }
 
 static hwaddr bef;
-uint64_t ra2l1_mmio_aes_read(void *opaque, hwaddr addr, unsigned size) {
+uint64_t ra2l1_mmio_aes_read(void *opaque, hwaddr _addr, unsigned size) {
     uint64_t value = 0;
+    hwaddr addr = (intptr_t)(((uint8_t *)R_AES) + _addr);
     if (bef != addr) {
         // g_print("aes read %lx\n", addr);
         bef = addr;
@@ -378,9 +381,10 @@ uint64_t ra2l1_mmio_aes_read(void *opaque, hwaddr addr, unsigned size) {
     return value;
 }
 
-void ra2l1_mmio_aes_write(void *opaque, hwaddr addr, uint64_t value,
+void ra2l1_mmio_aes_write(void *opaque, hwaddr _addr, uint64_t value,
                           unsigned size) {
 
+    hwaddr addr = (intptr_t)(((uint8_t *)R_AES) + _addr);
     // g_print("aes write %lx <- %lx\n", addr, value);
 
     switch (addr) {
@@ -407,4 +411,17 @@ void ra2l1_mmio_aes_write(void *opaque, hwaddr addr, uint64_t value,
     }
 }
 
+static MemoryRegionOps ops = {
+    .read = ra2l1_mmio_aes_read,
+    .write = ra2l1_mmio_aes_write,
+};
+
+sc324_state_t *renesas_aes_init(MemoryRegion *system_memory,
+                                DeviceState *dev_soc, hwaddr baseaddr) {
+    sc324_state_t *s = g_new0(sc324_state_t, 1);
+    memory_region_init_io(&s->mmio, OBJECT(dev_soc), &ops, s, "renesas.sc324",
+                          sizeof(R_AES_Type));
+    memory_region_add_subregion(system_memory, (hwaddr)R_AES, &s->mmio);
+    return s;
+}
 // #pragma GCC diagnostic pop

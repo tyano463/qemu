@@ -1,6 +1,9 @@
 #ifndef __RENESAS_COMMON_H__
 #define __RENESAS_COMMON_H__
 
+#define ASCII_CODE_CR 0xd
+#define ASCII_CODE_LF 0xa
+
 #define __FILENAME__                                                           \
     (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define dlog(s, ...)                                                           \
@@ -22,13 +25,19 @@
         (_out);                                                                \
     })
 
-#define ERRRET(c, s, ...)                                                      \
+#define ERR_RET(c, s, ...)                                                      \
     do {                                                                       \
         if (c) {                                                               \
             g_print("%s(%d) %s " s "\n", __FILENAME__, __LINE__, __func__,     \
                     ##__VA_ARGS__);                                            \
             goto error_return;                                                 \
         }                                                                      \
+    } while (0)
+
+#define ERR_RETn(c)                                                            \
+    do {                                                                       \
+        if (c)                                                                 \
+            goto error_return;                                                 \
     } while (0)
 
 #define U32(v) ((v) & (~(uint32_t)0))
