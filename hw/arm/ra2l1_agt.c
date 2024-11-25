@@ -1,6 +1,7 @@
 #include "qemu/osdep.h"
-#include <time.h>
+
 #include "hw/irq.h"
+#include <time.h>
 
 #include "R7FA2L1AB.h"
 #include "ra2l1.h"
@@ -21,8 +22,13 @@ bool is_agt(hwaddr addr) {
            (addr < ((uintptr_t)R_AGT0 + sizeof(R_AGTX0_Type)));
 }
 
-uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr addr, unsigned size) {
+uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr _addr, unsigned size) {
     uint64_t value = 0;
+
+    renesas_agt_t *s = (renesas_agt_t *)opaque;
+    hwaddr addr = s->baseaddr + _addr -
+                  (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
+
     switch (addr) {
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTCR:
         break;
@@ -105,9 +111,13 @@ static void setmode(uint64_t value, int kind) {
     }
 }
 
-void ra2l1_mmio_agt_write(void *opaque, hwaddr addr, uint64_t value,
+void ra2l1_mmio_agt_write(void *opaque, hwaddr _addr, uint64_t value,
                           unsigned size) {
     // dlog("a:%lx v:%lx", addr, value);
+    renesas_agt_t *s = (renesas_agt_t *)opaque;
+
+    hwaddr addr = s->baseaddr + _addr -
+                  (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
     switch (addr) {
     case (uintptr_t)&R_AGT0->AGT16.AGT:
         counter = (uint16_t)value & 0xffff;
@@ -135,4 +145,21 @@ void ra2l1_mmio_agt_write(void *opaque, hwaddr addr, uint64_t value,
     default:
         break;
     }
+}
+
+static MemoryRegionOps ops = {
+    .read = ra2l1_mmio_agt_read,
+    .write = ra2l1_mmio_agt_write,
+};
+
+renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, DeviceState *dev_soc,
+                              hwaddr baseaddr, int channel) {
+    renesas_agt_t *s = g_new0(renesas_agt_t, 1);
+    s->channel = channel;
+    s->baseaddr = baseaddr;
+
+    memory_region_init_io(&s->mmio, OBJECT(dev_soc), &ops, s, "renesas.agt",
+                          sizeof(R_AGTX0_Type));
+    memory_region_add_subregion(system_memory, baseaddr, &s->mmio);
+    return s;
 }

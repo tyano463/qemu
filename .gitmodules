@@ -43,3 +43,6 @@
 [submodule "tests/lcitool/libvirt-ci"]
 	path = tests/lcitool/libvirt-ci
 	url = https://gitlab.com/libvirt/libvirt-ci.git
+[submodule "hw/arm/gpio_gui_lib"]
+	path = hw/arm/gpio_gui_lib
+	url = git@github.com:tyano463/gpio_gui_lib.git

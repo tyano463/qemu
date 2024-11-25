@@ -6,18 +6,34 @@
 #include "hw/sysbus.h"
 #include "qemu/osdep.h"
 
+#include "ra2l1_agt.h"
 #include "ra2l1_sc324_aes.h"
 
+#define RENESAS_LOCAL_UART 1
+
 #define RA2L1_UART_NUM 10
+#define RA2L1_AGT_NUM 10
 
 #define SCI_SCR_TIE_MASK (0x80U) ///< Transmit Interrupt Enable
 
 typedef struct ra_uart {
     SysBusDevice parent;
     CharBackend chr;
+    MemoryRegion mmio;
     qemu_irq irq_txi;
     qemu_irq irq_tei;
     qemu_irq irq_rxi;
+    bool rx_full;
+    int channel;
+
+#ifdef RENESAS_LOCAL_UART
+    pthread_t th;
+    int fd;
+    int running;
+    void (*callback)(int channel, const char *s, size_t n);
+    char rx_buf[0x400];
+    size_t rx_pos;
+#endif
 } RA2L1UartState;
 
 typedef struct ra_state {
@@ -32,6 +48,7 @@ typedef struct ra_state {
     MemoryRegion mmio;
     RA2L1UartState uart[RA2L1_UART_NUM];
     sc324_state_t *aes;
+    renesas_agt_t *agt[RA2L1_AGT_NUM];
     Clock *sysclk;
     Clock *refclk;
     QemuMutex lock;
@@ -39,8 +56,6 @@ typedef struct ra_state {
     Notifier shutdown_notifier;
 } RA2L1State;
 
-int local_uart_init(RA2L1State *s, int channel,
-                    void (*cb)(int channel, const char *s, ssize_t n));
-void local_uart_write(int channel, const char *s, size_t size);
+int local_uart_init(MemoryRegion *sysmem, RA2L1State *s, hwaddr, int channel);
 
 #endif

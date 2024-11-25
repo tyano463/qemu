@@ -66,6 +66,7 @@ arm_ss.add(when: 'CONFIG_RA2L1', if_true: files(
   'ra2l1_agt.c',
   'ra2l1_flash.c',
   'ra2l1_sc324_aes.c',
+  'ra2l1_gpio.c',
   'renesas_uart.c',
   'renesas_uart_stub.c'))
 
@@ -85,5 +86,19 @@ system_ss.add(when: 'CONFIG_TOSA', if_true: files('tosa.c'))
 system_ss.add(when: 'CONFIG_VERSATILE', if_true: files('versatilepb.c'))
 system_ss.add(when: 'CONFIG_VEXPRESS', if_true: files('vexpress.c'))
 system_ss.add(when: 'CONFIG_Z2', if_true: files('z2.c'))
+
+# hw/arm/meson.build
+
+system_ss.add(when: 'CONFIG_VEXPRESS', if_true: files('vexpress.c'))
+system_ss.add(when: 'CONFIG_Z2', if_true: files('z2.c'))
+
+custom_target('copy_files_from_submodule',
+  output: 'dummy',
+  command: [
+    'cp', '-r', meson.current_source_dir() / 'gpio_gui_lib' / 'libx11_gpio.so',
+    meson.build_root() / 'libx11_gpio.so'
+  ],
+  build_by_default: true
+)
 
 hw_arch += {'arm': arm_ss}

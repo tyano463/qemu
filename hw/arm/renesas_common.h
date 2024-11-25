@@ -4,6 +4,9 @@
 #define ASCII_CODE_CR 0xd
 #define ASCII_CODE_LF 0xa
 
+#define OK (0)
+#define NG (-1)
+
 #define __FILENAME__                                                           \
     (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define dlog(s, ...)                                                           \
