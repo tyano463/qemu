@@ -56,6 +56,6 @@ typedef struct ra_state {
     Notifier shutdown_notifier;
 } RA2L1State;
 
-int local_uart_init(MemoryRegion *sysmem, RA2L1State *s, hwaddr, int channel);
+int local_uart_init(MemoryRegion *sysmem, RA2L1State *s, DeviceState *,hwaddr, int channel);
 
 #endif

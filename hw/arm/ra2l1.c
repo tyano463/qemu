@@ -40,23 +40,20 @@
 OBJECT_DECLARE_SIMPLE_TYPE(ra_state, RA2L1_SYS)
 
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr, unsigned size);
-static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
-                             unsigned size);
+static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
 // static void uart_write(void *opaque, int kind, uint8_t data);
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m);
 
 void im920_init(void (*received)(char *, int));
 void im920_write(char *, int);
 
-static MemoryRegionOps mmio_op = {.read = ra2l1_mmio_read,
-                                  .write = ra2l1_mmio_write,
-                                  .endianness = DEVICE_LITTLE_ENDIAN};
+static MemoryRegionOps mmio_op = {
+    .read = ra2l1_mmio_read, .write = ra2l1_mmio_write, .endianness = DEVICE_LITTLE_ENDIAN};
 static MemoryRegionOps flash_io_op = {.read = ra2l1_mmio_flash_read,
                                       .write = ra2l1_mmio_flash_write,
                                       .endianness = DEVICE_LITTLE_ENDIAN};
-static MemoryRegionOps dflash_op = {.read = ra2l1_dflash_read,
-                                    .write = ra2l1_dflash_write,
-                                    .endianness = DEVICE_LITTLE_ENDIAN};
+static MemoryRegionOps dflash_op = {
+    .read = ra2l1_dflash_read, .write = ra2l1_dflash_write, .endianness = DEVICE_LITTLE_ENDIAN};
 
 static uint8_t **uart_wbuf;
 static uint16_t *uart_windex;
@@ -106,17 +103,14 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     clock_set_mul_div(s->refclk, 8, 1);
     clock_set_source(s->refclk, s->sysclk);
 
-    memory_region_init_rom(&s->flash, OBJECT(dev_soc), "ra2l1.flash", 0x20000,
-                           &error_fatal);
-    memory_region_init_alias(&s->flash_alias, OBJECT(dev_soc),
-                             "ra2l1.flash.alias", &s->flash, 0, 0x20000);
+    memory_region_init_rom(&s->flash, OBJECT(dev_soc), "ra2l1.flash", 0x20000, &error_fatal);
+    memory_region_init_alias(&s->flash_alias, OBJECT(dev_soc), "ra2l1.flash.alias", &s->flash, 0,
+                             0x20000);
     memory_region_add_subregion(system_memory, 0, &s->flash);
     memory_region_add_subregion(system_memory, 0, &s->flash_alias);
 
-    memory_region_init_io(&s->dflash, OBJECT(dev_soc), dflash_ops, dev_soc,
-                          "ra2l1.dflash", 0x2000);
-    memory_region_add_subregion(system_memory, FLASH_LP_DF_START_ADDRESS,
-                                &s->dflash);
+    memory_region_init_io(&s->dflash, OBJECT(dev_soc), dflash_ops, dev_soc, "ra2l1.dflash", 0x2000);
+    memory_region_add_subregion(system_memory, FLASH_LP_DF_START_ADDRESS, &s->dflash);
 
     /* Init SRAM region */
     memory_region_init_ram(&s->sram, NULL, "ra2l1.sram", 0x8000, &error_fatal);
@@ -130,25 +124,24 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     qdev_prop_set_bit(armv7m, "enable-bitband", true);
     qdev_connect_clock_in(armv7m, "cpuclk", s->sysclk);
     qdev_connect_clock_in(armv7m, "refclk", s->refclk);
-    object_property_set_link(OBJECT(&s->armv7m), "memory",
-                             OBJECT(get_system_memory()), &error_abort);
+    object_property_set_link(OBJECT(&s->armv7m), "memory", OBJECT(get_system_memory()),
+                             &error_abort);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
         return;
     }
 
-    memory_region_init_io(&s->flash_io, OBJECT(dev_soc), ops, dev_soc,
-                          "ra2l1.flash_io", 0x20000);
+    memory_region_init_io(&s->flash_io, OBJECT(dev_soc), ops, dev_soc, "ra2l1.flash_io", 0x20000);
     memory_region_add_subregion(system_memory, 0x407E0000, &s->flash_io);
 
-    memory_region_init_io(&s->mmio, OBJECT(dev_soc), mmio_ops, dev_soc,
-                          "ra2l1.mmio", (intptr_t)R_SCI0 - PERIPHERAL_BASE);
+    memory_region_init_io(&s->mmio, OBJECT(dev_soc), mmio_ops, dev_soc, "ra2l1.mmio",
+                          (intptr_t)R_SCI0 - PERIPHERAL_BASE);
     memory_region_add_subregion(system_memory, PERIPHERAL_BASE, &s->mmio);
 
     s->aes = renesas_aes_init(system_memory, dev_soc, (intptr_t)R_AES);
     s->agt[0] = ra2l1_agt_init(system_memory, dev_soc, (intptr_t)R_AGT0, 0);
 
-    local_uart_init(system_memory, s, (intptr_t)R_SCI0, 0);
-    local_uart_init(system_memory, s, (intptr_t)R_SCI9, 9);
+    local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI0, 0);
+    local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI9, 9);
 
     register_irq(dev_soc, armv7m);
 
@@ -174,7 +167,7 @@ static hwaddr bef;
  */
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
     RA2L1State *s = opaque;
-    uint64_t a_addr = addr + 0x40000000;
+    uint64_t a_addr = addr + PERIPHERAL_BASE;
     uint64_t value = 0;
     int channel = -1;
 
@@ -214,9 +207,8 @@ end:
 /**
  * 0x40000000 - 0x40100000
  */
-static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
-                             unsigned size) {
-    uint64_t a_addr = addr + 0x40000000;
+static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
+    uint64_t a_addr = addr + PERIPHERAL_BASE;
     RA2L1State *s = opaque;
     int channel = -1;
 
@@ -227,6 +219,10 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value,
     if (is_gpio(a_addr)) {
         ra2l1_gpio_write(opaque, a_addr, value, size);
     }
+
+    // 割り込み関連は多いので表示しない
+    if (!(a_addr & R_ICU_BASE))
+        dlog("%lx <- %lx", addr, value);
 
     switch (a_addr) {
     case (uint64_t)&R_SYSTEM->MOSCCR:
@@ -285,7 +281,9 @@ static const TypeInfo ra2l1_soc_info = {
     .class_init = ra2l1_soc_class_init,
 };
 
-static void ra2l1_soc_types(void) { type_register_static(&ra2l1_soc_info); }
+static void ra2l1_soc_types(void) {
+    type_register_static(&ra2l1_soc_info);
+}
 
 type_init(ra2l1_soc_types);
 
@@ -302,13 +300,12 @@ static void ra2l1_init(MachineState *machine) {
     qdev_connect_clock_in(dev, "sysclk", sysclk);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
 
-    armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0,
-                       0x20000);
+    armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0, 0x20000);
 }
 
 static void ra2l1_machine_init(MachineClass *mc) {
-    static const char *const valid_cpu_types[] = {
-        ARM_CPU_TYPE_NAME("cortex-m23"), ARM_CPU_TYPE_NAME("cortex-m33"), NULL};
+    static const char *const valid_cpu_types[] = {ARM_CPU_TYPE_NAME("cortex-m23"),
+                                                  ARM_CPU_TYPE_NAME("cortex-m33"), NULL};
 
     mc->desc = "Renesas RA(Cortex-M23)";
     mc->init = ra2l1_init;

@@ -25,11 +25,13 @@ typedef enum {
     PCNTR2,
     PCNTR3,
     PCNTR4,
+    PFS,
     INVAL = -1,
 } RegAddr;
 
 typedef struct {
     int port;
+    int pin;
     hwaddr addr;
     RegAddr reg;
 } gpio_reg_t;
@@ -41,7 +43,8 @@ static bool (*launched)(void);
 
 bool is_gpio(hwaddr addr) {
     hwaddr reg_size = (hwaddr)R_PORT1 - (hwaddr)R_PORT0;
-    return ((hwaddr)R_PORT0 < addr) && (addr < ((hwaddr)R_PORT8) + reg_size);
+    return (((hwaddr)R_PORT0 <= addr) && (addr < ((hwaddr)R_PORT0) + reg_size * GPIO_PORT_NUM)) ||
+           (((hwaddr)R_PFS <= addr) && (addr < ((hwaddr)R_PFS) + sizeof(R_PFS_Type)));
 }
 
 static void *launch(void *arg) {
@@ -104,29 +107,41 @@ static int addr_to_reg(gpio_reg_t *reg, hwaddr addr) {
     size_t reg_size;
     hwaddr gpio_addr;
 
-    reg_size = ((hwaddr)R_PORT1_BASE - (hwaddr)R_PORT0_BASE);
-    gpio_addr = addr - (hwaddr)R_PORT0_BASE;
+    if (addr >= (hwaddr)R_PFS) {
+        gpio_addr = addr - (hwaddr)R_PFS_BASE;
+        reg->port = gpio_addr / sizeof(R_PFS_PORT_Type);
+        ERR_RETn(reg->port >= GPIO_PORT_NUM);
 
-    reg->port = gpio_addr / reg_size;
-    ERR_RETn(reg->port >= GPIO_PORT_NUM);
+        reg->pin = (gpio_addr % sizeof(R_PFS_PORT_Type)) / sizeof(R_PFS_PORT_PIN_Type);
 
-    reg->addr = gpio_addr % reg_size;
-    ERR_RETn(reg->addr >= reg_size);
+        reg->addr = gpio_addr % sizeof(R_PFS_PORT_PIN_Type);
+        // dlog("pfs:%lx %d/%d %lx", gpio_addr, reg->port, reg->pin, reg->addr);
 
-    reg->reg = get_register(reg->addr);
-    ERR_RETn(reg->reg == INVAL);
+        reg->reg = PFS;
+    } else {
+        reg_size = ((hwaddr)R_PORT1_BASE - (hwaddr)R_PORT0_BASE);
+        gpio_addr = addr - (hwaddr)R_PORT0_BASE;
+
+        reg->port = gpio_addr / reg_size;
+        ERR_RETn(reg->port >= GPIO_PORT_NUM);
+
+        reg->addr = gpio_addr % reg_size;
+
+        reg->reg = get_register(reg->addr);
+        ERR_RETn(reg->reg == INVAL);
+    }
 
     ret = OK;
 error_return:
     return ret;
 }
 
+hwaddr bef_raddr;
 uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
     uint64_t value = 0;
     int ret;
     gpio_reg_t reg;
 
-    dlog("addr:%lx sz:%d", addr, size);
     ret = addr_to_reg(&reg, addr);
     ERR_RETn(ret != OK);
 
@@ -135,15 +150,23 @@ uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
         // PDRとPODRの両方がある。
         value = (uint64_t)((((uint16_t)(gpio[reg.port].val & 0xffff)) << 16) |
                            ((uint16_t)((gpio[reg.port].pdr & 0xffff))));
-        dlog("v:%lx", value);
+        if (bef_raddr != addr) {
+            dlog("addr:%lx sz:%d v:%lx", addr, size, value);
+            bef_raddr = addr;
+        }
         break;
     case PCNTR2:
         value = (uint64_t)((uint16_t)(gpio[reg.port].val & 0xffff));
-        dlog("v:%lx", value);
+        if (bef_raddr != addr) {
+            dlog("addr:%lx sz:%d v:%lx", addr, size, value);
+            bef_raddr = addr;
+        }
         break;
     case PCNTR3:
         break;
     case PCNTR4:
+        break;
+    case PFS:
         break;
     case INVAL:
         break;
@@ -152,12 +175,14 @@ error_return:
     return value;
 }
 
-void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value,
-                      unsigned size) {
+hwaddr bef_waddr;
+void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
 
     int ret;
     gpio_reg_t reg;
     uint16_t upper, lower;
+    uint32_t regval = (uint32_t)(value & 0xFFFFFFFF);
+    R_PFS_PORT_PIN_Type *pfs = (R_PFS_PORT_PIN_Type *)&regval;
 
     ret = addr_to_reg(&reg, addr);
     ERR_RETn(ret != OK);
@@ -169,19 +194,43 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value,
     case PCNTR1:
         gpio[reg.port].pdr = lower;
         gpio[reg.port].val = upper;
+        if (bef_waddr != addr) {
+            dlog("%lx(port:%d) <- %lx", addr, reg.port, value);
+            bef_waddr = addr;
+        }
         break;
     case PCNTR2:
         gpio[reg.port].val = lower;
+        if (bef_waddr != addr) {
+            dlog("%lx <- %lx", addr, value);
+            bef_waddr = addr;
+        }
         break;
     case PCNTR3:
         break;
     case PCNTR4:
         break;
+    case PFS:
+        uint32_t pdr = pfs->PmnPFS_b.PDR;
+        uint32_t pcr = pfs->PmnPFS_b.PCR;
+        if (pdr) {
+            // output
+            dlog("port:%d pin:%d output", reg.port, reg.pin);
+
+        } else {
+            // input
+            if (pcr) {
+                gpio[reg.port].val |= (1 << reg.pin);
+            }
+            dlog("port:%d pin:%d input pull-up:%d", reg.port, reg.pin, pcr);
+        }
+        break;
     case INVAL:
+        dlog("Error %lx <- %lx", addr, value);
         break;
     }
 
-    dlog("%lx <- %lx", addr, value);
+    // dlog("%lx <- %lx", addr, value);
 error_return:
     return;
 }
