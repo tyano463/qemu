@@ -140,7 +140,14 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
     ret = 0;
 
     if (!uart_rbuf) {
-        uart_rbuf = malloc(sizeof(uart_buf_t) * RA2L1_UART_NUM);
+        uart_rbuf = malloc(sizeof(uart_buf_t) * RA2L1_UART_NUM + MAX_BUF_SIZE * RA2L1_UART_NUM);
+    }
+
+    for (int i = 0; i < RA2L1_UART_NUM; i++) {
+        uart_rbuf[i].buf = ((uint8_t*)&uart_rbuf[RA2L1_UART_NUM]) + (MAX_BUF_SIZE * i);
+        uart_rbuf[i].buf[0] = '\0';
+        uart_rbuf[i].cur = 0;
+        uart_rbuf[i].st = 0;
     }
 
 #if RENESAS_LOCAL_UART
@@ -156,15 +163,11 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
 
     p->callback = local_uart_receive;
     p->running = true;
-    struct {
-        RA2L1UartState *uart;
-        int channel;
-    } arg = {
-        .uart = &s->uart[channel],
-        .channel = channel,
-    };
-    ret = pthread_create(&p->th, NULL, local_uart_receive_main, (void *)&arg);
+    p->channel = channel;
+
+    ret = pthread_create(&p->th, NULL, local_uart_receive_main, (void *)p);
     ERR_RET(ret != 0, "pthread_create error");
+
 #endif
 
 error_return:
@@ -180,8 +183,8 @@ static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size)
     memcpy(buf, str, size);
     if (uart->fd >= 0) {
         write(uart->fd, str, size);
-        buf[size] = '\0';
-        dlog("%s", buf);
+        // buf[size] = '\0';
+        // dlog("%s", buf);
     }
     return;
 }
@@ -196,43 +199,49 @@ static void local_uart_receive(int channel, const char *buf, size_t len) {
 }
 
 static void to_rbuf(int channel, const char *buf, size_t len) {
+    // dlog("IN len:%ld", len);
     uart_buf_t *p = &uart_rbuf[channel];
     if (p->cur + len < MAX_BUF_SIZE) {
+        // dlog("short");
         memcpy(&p->buf[p->cur], buf, len + 1);
         p->cur += len;
+        p->buf[p->cur] = '\0';
     } else {
-        int copied = MAX_BUF_SIZE - p->cur - 1;
+        // dlog("loop");
+        int copied = p->cur + len - MAX_BUF_SIZE - 1;
         memcpy(&p->buf[p->cur], buf, copied);
         memcpy(p->buf, &buf[copied], len - copied);
         p->buf[len - copied] = '\0';
         p->cur = len - copied;
     }
 
-    char *s = b2s(p->buf, MAX_BUF_SIZE);
-    printf("st:%d cur:%d buf:\n%s\n", p->st, p->cur, s);
+    // char *s = b2s(p->buf, MAX_BUF_SIZE);
+    // printf("st:%d cur:%d buf:\n%s\n", p->st, p->cur, s);
+    // dlog("OUT");
 }
 
 static void *local_uart_receive_main(void *arg) {
-    RA2L1State *s = ((RA2L1State **)arg)[0];
-    int channel = (intptr_t)((RA2L1State **)arg)[1];
-    static char buf[MAX_BUF_SIZE];
-    static RA2L1UartState *p;
+
+    char buf[MAX_BUF_SIZE];
+    RA2L1UartState *p = (RA2L1UartState *)arg;
+    int channel = p->channel;
 
     ERR_RETn(channel < 0 || channel > MAX_MIN_VER);
-    p = &s->uart[channel];
+
+    dlog("uart receiver launched %p ch:%d tid:%lx", p, p->channel, pthread_self());
 
     while (p->running) {
         ssize_t len = read(p->fd, buf, MAX_BUF_SIZE);
         ERR_RET(len < 0, "uart read error");
-
         if (!len)
             continue;
 
+        // dlog("received st");
         to_rbuf(channel, buf, len);
 
         int start = 0;
         buf[len] = '\0';
-        // g_print("buf:%s\n", buf);
+        // dlog("buf:%s", buf);
         for (int i = start; i < len; i++) {
             if (buf[i] == ASCII_CODE_CR || buf[i] == ASCII_CODE_LF) {
                 buf[i] = '\n';
@@ -250,6 +259,7 @@ static void *local_uart_receive_main(void *arg) {
             p->rx_pos += len - start;
         }
         qemu_set_irq(p->irq_rxi, 1);
+        // dlog("received en");
     }
 error_return:
     return NULL;

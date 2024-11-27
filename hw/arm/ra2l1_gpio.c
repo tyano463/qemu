@@ -1,4 +1,5 @@
 #include "qemu/osdep.h"
+
 #include <dlfcn.h>
 
 #include "ra2l1_gpio.h"
@@ -136,6 +137,16 @@ error_return:
     return ret;
 }
 
+char pin_str[32];
+static char *gpio_pin_value(uint16_t val) {
+    const char *s = ".1";
+    for (int i = 0; i < 16; i++) {
+        pin_str[15 - i] = s[((val & (1 << i)) != 0)];
+    }
+    pin_str[16] = '\0';
+    return pin_str;
+}
+
 hwaddr bef_raddr;
 uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
     uint64_t value = 0;
@@ -151,14 +162,16 @@ uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
         value = (uint64_t)((((uint16_t)(gpio[reg.port].val & 0xffff)) << 16) |
                            ((uint16_t)((gpio[reg.port].pdr & 0xffff))));
         if (bef_raddr != addr) {
-            dlog("addr:%lx sz:%d v:%lx", addr, size, value);
+            dlog("addr:%lx v:%lx port:%d (%s)", addr, value, reg.port,
+                 gpio_pin_value(gpio[reg.port].val));
             bef_raddr = addr;
         }
         break;
     case PCNTR2:
         value = (uint64_t)((uint16_t)(gpio[reg.port].val & 0xffff));
         if (bef_raddr != addr) {
-            dlog("addr:%lx sz:%d v:%lx", addr, size, value);
+            dlog("addr:%lx v:%lx port:%d (%s)", addr, value, reg.port,
+                 gpio_pin_value(gpio[reg.port].val));
             bef_raddr = addr;
         }
         break;
@@ -195,14 +208,14 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) 
         gpio[reg.port].pdr = lower;
         gpio[reg.port].val = upper;
         if (bef_waddr != addr) {
-            dlog("%lx(port:%d) <- %lx", addr, reg.port, value);
+            dlog("%lx <- %lx port:%d(%s)", addr, value, reg.port, gpio_pin_value(upper));
             bef_waddr = addr;
         }
         break;
     case PCNTR2:
         gpio[reg.port].val = lower;
         if (bef_waddr != addr) {
-            dlog("%lx <- %lx", addr, value);
+            dlog("%lx <- %lx port:%d(%s)", addr, value, reg.port, gpio_pin_value(lower));
             bef_waddr = addr;
         }
         break;
