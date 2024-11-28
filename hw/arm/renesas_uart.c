@@ -70,8 +70,10 @@ static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, 
 #if RENESAS_LOCAL_UART
         local_uart_write(uart, (const char *)&data, 1);
 #endif
-        if (scr[channel] & SCI_SCR_TIE_MASK)
+        if (scr[channel] & SCI_SCR_TIE_MASK) {
+            dlog("channel:%d irq_txi", uart->channel);
             qemu_irq_pulse(uart->irq_txi);
+        }
         break;
     case (uint64_t)&R_SCI0->SCR:
         if ((scr[channel] & SCI_SCR_TIE_MASK) && (!(value & SCI_SCR_TIE_MASK))) {
@@ -118,6 +120,9 @@ static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2
         sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, irqnum[channel].txi));
         sysbus_connect_irq(busdev, 1, qdev_get_gpio_in(armv7m, irqnum[channel].tei));
         sysbus_connect_irq(busdev, 2, qdev_get_gpio_in(armv7m, irqnum[channel].rxi));
+
+        dlog("txi:%p tei:%p rxi:%p", ((irq_t *)uart->irq_txi)->handler,
+             ((irq_t *)uart->irq_tei)->handler, ((irq_t *)uart->irq_rxi)->handler);
     }
 
     size_t reg_size = (((intptr_t)R_SCI1) - ((intptr_t)R_SCI0));
@@ -144,7 +149,7 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
     }
 
     for (int i = 0; i < RA2L1_UART_NUM; i++) {
-        uart_rbuf[i].buf = ((uint8_t*)&uart_rbuf[RA2L1_UART_NUM]) + (MAX_BUF_SIZE * i);
+        uart_rbuf[i].buf = ((uint8_t *)&uart_rbuf[RA2L1_UART_NUM]) + (MAX_BUF_SIZE * i);
         uart_rbuf[i].buf[0] = '\0';
         uart_rbuf[i].cur = 0;
         uart_rbuf[i].st = 0;

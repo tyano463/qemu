@@ -16,21 +16,21 @@ static uint16_t counter;
 static uint8_t tmod;
 static uint8_t tck;
 static uint8_t dr;
+static uint8_t agtcr;
 
 bool is_agt(hwaddr addr) {
-    return ((uintptr_t)R_AGT0 <= addr) &&
-           (addr < ((uintptr_t)R_AGT0 + sizeof(R_AGTX0_Type)));
+    return ((uintptr_t)R_AGT0 <= addr) && (addr < ((uintptr_t)R_AGT0 + sizeof(R_AGTX0_Type)));
 }
 
 uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr _addr, unsigned size) {
     uint64_t value = 0;
 
     renesas_agt_t *s = (renesas_agt_t *)opaque;
-    hwaddr addr = s->baseaddr + _addr -
-                  (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
+    hwaddr addr = s->baseaddr + _addr - (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
 
     switch (addr) {
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTCR:
+        value = agtcr;
         break;
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTMR1:
         break;
@@ -52,6 +52,7 @@ uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr _addr, unsigned size) {
     return value;
 }
 
+#if 0
 static uint64_t getfreq(void) {
     uint64_t candidates[] = {PCLKB, PCLKB / 8, 0, PCLKB / 2, 0, 0, 0, 0};
     return candidates[tck];
@@ -62,13 +63,25 @@ static void *timer_main(void *arg) {
     uint64_t ns;
     uint64_t freq;
 
-    RA2L1State *s = (RA2L1State *)arg;
+    renesas_agt_t *s = (renesas_agt_t *)arg;
 
     freq = getfreq();
+    if (counter == 0) {
+        counter = 0xffff;
+    }
     ns = (uint64_t)(1e9 * (double)counter / freq);
+    ns *= 100;
     interval.tv_sec = ns / 1e9;
     interval.tv_nsec = ns % (uint64_t)1e9;
-    dlog("timer started");
+    typedef struct IRQState {
+        Object parent_obj;
+
+        qemu_irq_handler handler;
+        void *opaque;
+        int n;
+    } irq_t;
+    dlog("timer started handler:%p interval:%f", ((irq_t *)s->irq_agt)->handler,
+         ((double)ns) / 1e9);
     while (running) {
         nanosleep(&interval, NULL);
         qemu_irq_pulse(s->irq_agt);
@@ -79,24 +92,31 @@ static void *timer_main(void *arg) {
     }
     return NULL;
 }
+#endif
 
 static void start_timer(void *opaque) {
-    pthread_t th;
+    // pthread_t th;
     int ret;
 
-    running = true;
-    ret = pthread_create(&th, NULL, timer_main, opaque);
-    if (ret) {
-        dlog("timer thread create failed");
+    if (!running) {
+        running = true;
+        // ret = pthread_create(&th, NULL, timer_main, opaque);
+        ret = 0;
+        if (ret) {
+            dlog("timer thread create failed");
+        }
     }
 }
 
 static void proc_timer(void *opaque, uint64_t value) {
     switch (value) {
     case AGT_PRV_AGTCR_START_TIMER:
+        agtcr |= (0x3);
         start_timer(opaque);
         break;
-
+    case AGT_PRV_AGTCR_STOP_TIMER:
+        agtcr &= (~((uint8_t)0x3));
+        break;
     default:
         break;
     }
@@ -106,30 +126,33 @@ static void setmode(uint64_t value, int kind) {
         dr = value & 7;
     } else {
         tmod = value & 7;
-        dlog("update tmod:%x", tmod);
+        // dlog("update tmod:%x", tmod);
         tck = (value & 0x70) >> 4;
     }
 }
 
-void ra2l1_mmio_agt_write(void *opaque, hwaddr _addr, uint64_t value,
-                          unsigned size) {
+void ra2l1_mmio_agt_write(void *opaque, hwaddr _addr, uint64_t value, unsigned size) {
     // dlog("a:%lx v:%lx", addr, value);
     renesas_agt_t *s = (renesas_agt_t *)opaque;
 
-    hwaddr addr = s->baseaddr + _addr -
-                  (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
+    hwaddr addr = s->baseaddr + _addr - (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
     switch (addr) {
     case (uintptr_t)&R_AGT0->AGT16.AGT:
         counter = (uint16_t)value & 0xffff;
+        dlog("%08lx <- %08lx sz:%d", addr, value, size);
         break;
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTCR:
+        agtcr = (uint8_t)(value & 0xff);
         proc_timer(opaque, value);
+        // dlog("%08lx <- %08lx sz:%d", addr, value, size);
         break;
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTMR1:
         setmode(value, 0);
+        dlog("%08lx <- %08lx sz:%d", addr, value, size);
         break;
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTMR2:
         setmode(value, 1);
+        dlog("%08lx <- %08lx sz:%d", addr, value, size);
         break;
     case (uintptr_t)&R_AGT0->AGT16.CTRL.AGTIOSEL_ALT:
         break;
@@ -152,14 +175,13 @@ static MemoryRegionOps ops = {
     .write = ra2l1_mmio_agt_write,
 };
 
-renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, DeviceState *dev_soc,
-                              hwaddr baseaddr, int channel) {
+renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, DeviceState *dev_soc, hwaddr baseaddr,
+                              int channel) {
     renesas_agt_t *s = g_new0(renesas_agt_t, 1);
     s->channel = channel;
     s->baseaddr = baseaddr;
-
-    memory_region_init_io(&s->mmio, OBJECT(dev_soc), &ops, s, "renesas.agt",
-                          sizeof(R_AGTX0_Type));
+    sysbus_init_irq(SYS_BUS_DEVICE(dev_soc), &s->irq_agt);
+    memory_region_init_io(&s->mmio, OBJECT(dev_soc), &ops, s, "renesas.agt", sizeof(R_AGTX0_Type));
     memory_region_add_subregion(system_memory, baseaddr, &s->mmio);
     return s;
 }

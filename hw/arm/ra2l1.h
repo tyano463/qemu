@@ -16,6 +16,14 @@
 
 #define SCI_SCR_TIE_MASK (0x80U) ///< Transmit Interrupt Enable
 
+typedef struct {
+    Object parent_obj;
+
+    qemu_irq_handler handler;
+    void *opaque;
+    int n;
+} irq_t;
+
 typedef struct ra_uart {
     SysBusDevice parent;
     CharBackend chr;
@@ -52,10 +60,9 @@ typedef struct ra_state {
     Clock *sysclk;
     Clock *refclk;
     QemuMutex lock;
-    qemu_irq irq_agt;
     Notifier shutdown_notifier;
 } RA2L1State;
 
-int local_uart_init(MemoryRegion *sysmem, RA2L1State *s, DeviceState *,hwaddr, int channel);
+int local_uart_init(MemoryRegion *sysmem, RA2L1State *s, DeviceState *, hwaddr, int channel);
 
 #endif

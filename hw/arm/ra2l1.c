@@ -65,9 +65,6 @@ static void ra2l1_soc_initfn(Object *obj) {
 
     s->sysclk = qdev_init_clock_in(DEVICE(s), "sysclk", NULL, NULL, 0);
     s->refclk = qdev_init_clock_in(DEVICE(s), "refclk", NULL, NULL, 0);
-
-    dlog("obj:%p", obj);
-    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_agt);
 }
 
 static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
@@ -155,7 +152,12 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
 
 static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
     // Timer
+    RA2L1State *s = RA2L1_SYS(dev_soc);
+    dlog("%p", s->agt[0]->irq_agt);
     sysbus_connect_irq(SYS_BUS_DEVICE(dev_soc), 0, qdev_get_gpio_in(armv7m, 3));
+
+    irq_t *p = (irq_t *)s->agt[0]->irq_agt;
+    dlog("%p %p", p, p->handler);
 }
 
 static uint64_t mosccr = 1;

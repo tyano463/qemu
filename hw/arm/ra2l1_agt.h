@@ -11,9 +11,11 @@
 #define AGT_PRV_AGTCR_START_TIMER (0xF1U)
 
 typedef struct str_renesas_agt {
+    SysBusDevice parent;
     MemoryRegion mmio;
     int channel;
     hwaddr baseaddr;
+    qemu_irq irq_agt;
 } renesas_agt_t;
 
 bool is_agt(hwaddr addr);
