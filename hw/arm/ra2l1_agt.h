@@ -3,6 +3,7 @@
 
 #include "exec/hwaddr.h"
 #include "qemu/osdep.h"
+#include "ra2l1.h"
 
 #define AGT_PRV_AGTCR_FORCE_STOP (0xF4U)
 #define AGT_PRV_AGTCR_FORCE_STOP_CLEAR_FLAGS (0x4U)
@@ -16,6 +17,7 @@ typedef struct str_renesas_agt {
     int channel;
     hwaddr baseaddr;
     qemu_irq irq_agt;
+    RA2L1State *s;
 } renesas_agt_t;
 
 bool is_agt(hwaddr addr);

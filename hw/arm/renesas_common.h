@@ -13,6 +13,7 @@
     do {                                                                       \
         g_print("%s(%d) %s " s "\n", __FILENAME__, __LINE__, __func__,         \
                 ##__VA_ARGS__);                                                \
+        fflush(stdout); \
     } while (0)
 
 #define MALLOC2d(_type, x, y)                                                  \
@@ -45,6 +46,6 @@
 
 #define U32(v) ((v) & (~(uint32_t)0))
 
-char *b2s(uint8_t *data, int n);
+char *b2s(const uint8_t *data, int n);
 
 #endif

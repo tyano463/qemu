@@ -6,6 +6,7 @@
 
 #include "./gpio_gui_lib/x11_gpio.h"
 #include "R7FA2L1AB.h"
+#include "ra2l1.h"
 #include "renesas_common.h"
 
 #define GPIO_GUI_LIB_DIR "gpio_gui_lib"
@@ -155,6 +156,7 @@ uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
 
     ret = addr_to_reg(&reg, addr);
     ERR_RETn(ret != OK);
+
 
     switch (reg.reg) {
     case PCNTR1:

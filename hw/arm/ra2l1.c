@@ -34,6 +34,8 @@
 #define NUM_PRIO_BITS 3
 #define SYSCLK_FRQ 24000000ULL
 
+#define RAM_SIZE 0x8000
+
 #define PERIPHERAL_BASE R_MPU_MMPU_BASE
 #define TYPE_RA2L1_SYS "ra2l1-sys"
 
@@ -58,7 +60,8 @@ static MemoryRegionOps dflash_op = {
 static uint8_t **uart_wbuf;
 static uint16_t *uart_windex;
 
-static void ra2l1_soc_initfn(Object *obj) {
+static void ra2l1_soc_initfn(Object *obj)
+{
     RA2L1State *s = RA2L1_SYS(obj);
 
     object_initialize_child(obj, "armv7m", &s->armv7m, TYPE_ARMV7M);
@@ -67,13 +70,15 @@ static void ra2l1_soc_initfn(Object *obj) {
     s->refclk = qdev_init_clock_in(DEVICE(s), "refclk", NULL, NULL, 0);
 }
 
-static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
+static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
+{
     RA2L1State *s = RA2L1_SYS(dev_soc);
     DeviceState *armv7m;
     MemoryRegionOps *ops = &flash_io_op;
     MemoryRegionOps *dflash_ops = &dflash_op;
     MemoryRegionOps *mmio_ops = &mmio_op;
     MemoryRegion *system_memory = get_system_memory();
+    int ret;
 
     dlog("dev_soc:%p s:%p", dev_soc, s);
     /*
@@ -81,12 +86,14 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
      * so it is correctly parented and not leaked on an init/deinit; it is not
      * intended as an externally exposed clock.
      */
-    if (clock_has_source(s->refclk)) {
+    if (clock_has_source(s->refclk))
+    {
         error_setg(errp, "refclk clock must not be wired up by the board code");
         return;
     }
 
-    if (!clock_has_source(s->sysclk)) {
+    if (!clock_has_source(s->sysclk))
+    {
         error_setg(errp, "sysclk clock must be wired up by the board code");
         return;
     }
@@ -110,7 +117,7 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     memory_region_add_subregion(system_memory, FLASH_LP_DF_START_ADDRESS, &s->dflash);
 
     /* Init SRAM region */
-    memory_region_init_ram(&s->sram, NULL, "ra2l1.sram", 0x8000, &error_fatal);
+    memory_region_init_ram(&s->sram, NULL, "ra2l1.sram", RAM_SIZE, &error_fatal);
     memory_region_add_subregion(system_memory, 0x20000000, &s->sram);
 
     /* Init ARMv7m */
@@ -123,7 +130,8 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     qdev_connect_clock_in(armv7m, "refclk", s->refclk);
     object_property_set_link(OBJECT(&s->armv7m), "memory", OBJECT(get_system_memory()),
                              &error_abort);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp)) {
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->armv7m), errp))
+    {
         return;
     }
 
@@ -136,9 +144,14 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
 
     s->aes = renesas_aes_init(system_memory, dev_soc, (intptr_t)R_AES);
     s->agt[0] = ra2l1_agt_init(system_memory, dev_soc, (intptr_t)R_AGT0, 0);
+    s->agt[0]->s = s;
 
-    local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI0, 0);
-    local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI9, 9);
+    ret = local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI0, 0);
+    ret |= local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI9, 9);
+    if (ret != OK)
+    {
+        exit(0);
+    }
 
     register_irq(dev_soc, armv7m);
 
@@ -150,7 +163,8 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp) {
     qemu_mutex_init(&s->lock);
 }
 
-static void register_irq(DeviceState *dev_soc, DeviceState *armv7m) {
+static void register_irq(DeviceState *dev_soc, DeviceState *armv7m)
+{
     // Timer
     RA2L1State *s = RA2L1_SYS(dev_soc);
     dlog("%p", s->agt[0]->irq_agt);
@@ -167,22 +181,26 @@ static hwaddr bef;
 /**
  * 0x40000000 - 0x40100000
  */
-static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size) {
+static uint64_t ra2l1_mmio_read(void *opaque, hwaddr addr, unsigned size)
+{
     RA2L1State *s = opaque;
     uint64_t a_addr = addr + PERIPHERAL_BASE;
     uint64_t value = 0;
     int channel = -1;
 
-    if (is_agt(a_addr)) {
+    if (is_agt(a_addr))
+    {
         value = ra2l1_mmio_agt_read(opaque, a_addr, size);
         goto end;
     }
-    if (is_gpio(a_addr)) {
+    if (is_gpio(a_addr))
+    {
         value = ra2l1_gpio_read(opaque, a_addr, size);
         goto end;
     }
 
-    switch (a_addr) {
+    switch (a_addr)
+    {
     case (uint64_t)&R_SYSTEM->OSCSF:
         // g_print("OSCSF\n");
         value = 9;
@@ -209,16 +227,19 @@ end:
 /**
  * 0x40000000 - 0x40100000
  */
-static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
+static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size)
+{
     uint64_t a_addr = addr + PERIPHERAL_BASE;
     RA2L1State *s = opaque;
     int channel = -1;
 
-    if (is_agt(a_addr)) {
+    if (is_agt(a_addr))
+    {
         ra2l1_mmio_agt_write(opaque, a_addr, value, size);
         goto end;
     }
-    if (is_gpio(a_addr)) {
+    if (is_gpio(a_addr))
+    {
         ra2l1_gpio_write(opaque, a_addr, value, size);
     }
 
@@ -226,7 +247,8 @@ static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned
     if (!(a_addr & R_ICU_BASE))
         dlog("%lx <- %lx", addr, value);
 
-    switch (a_addr) {
+    switch (a_addr)
+    {
     case (uint64_t)&R_SYSTEM->MOSCCR:
         mosccr = value;
         break;
@@ -245,12 +267,15 @@ end:
     return;
 }
 
-static void rchomp(char *s) {
+static void rchomp(char *s)
+{
     int i;
     int len = strlen(s);
     int found = -1;
-    for (i = len - 1; i; i--) {
-        switch (s[i]) {
+    for (i = len - 1; i; i--)
+    {
+        switch (s[i])
+        {
         case '\r':
         case '\n':
             break;
@@ -268,7 +293,8 @@ static void rchomp(char *s) {
     s[found + 2] = '\0';
 }
 
-static void ra2l1_soc_class_init(ObjectClass *klass, void *data) {
+static void ra2l1_soc_class_init(ObjectClass *klass, void *data)
+{
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = ra2l1_soc_realize;
@@ -283,13 +309,15 @@ static const TypeInfo ra2l1_soc_info = {
     .class_init = ra2l1_soc_class_init,
 };
 
-static void ra2l1_soc_types(void) {
+static void ra2l1_soc_types(void)
+{
     type_register_static(&ra2l1_soc_info);
 }
 
 type_init(ra2l1_soc_types);
 
-static void ra2l1_init(MachineState *machine) {
+static void ra2l1_init(MachineState *machine)
+{
     DeviceState *dev;
     Clock *sysclk;
 
@@ -305,7 +333,8 @@ static void ra2l1_init(MachineState *machine) {
     armv7m_load_kernel(ARM_CPU(first_cpu), machine->kernel_filename, 0, 0x20000);
 }
 
-static void ra2l1_machine_init(MachineClass *mc) {
+static void ra2l1_machine_init(MachineClass *mc)
+{
     static const char *const valid_cpu_types[] = {ARM_CPU_TYPE_NAME("cortex-m23"),
                                                   ARM_CPU_TYPE_NAME("cortex-m33"), NULL};
 

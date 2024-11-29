@@ -6,6 +6,7 @@
 #include "hw/sysbus.h"
 #include "qemu/osdep.h"
 
+typedef struct ra_state RA2L1State;
 #include "ra2l1_agt.h"
 #include "ra2l1_sc324_aes.h"
 

@@ -31,8 +31,26 @@ static void *local_uart_receive_main(void *arg);
 static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size);
 static void local_uart_receive(int channel, const char *buf, size_t len);
 
+static pthread_mutex_t mutex[RA2L1_UART_NUM];
 static uint64_t scr[RA2L1_UART_NUM];
 static uart_buf_t *uart_rbuf;
+
+#define TYPE_MY_DEVICE "my-device"
+
+typedef struct MyDevice
+{
+    DeviceState parent_obj;
+
+    int reg0, reg1, reg2;
+} MyDevice;
+static const TypeInfo device_types_info[] = {
+    {
+        .name = TYPE_MY_DEVICE,
+        .parent = TYPE_DEVICE,
+        .instance_size = sizeof(MyDevice),
+    },
+};
+DEFINE_TYPES(device_types_info)
 
 static uint64_t renesas_uart_mmio_read(void *opaque, hwaddr _addr, unsigned size) {
     hwaddr addr = _addr + (intptr_t)R_SCI0;
@@ -43,6 +61,7 @@ static uint64_t renesas_uart_mmio_read(void *opaque, hwaddr _addr, unsigned size
 
     switch (addr) {
     case (uint64_t)&R_SCI0->RDR:
+    pthread_mutex_lock(&mutex[channel]);
         if (p->st != p->cur) {
             value = p->buf[p->st++];
             p->st %= MAX_BUF_SIZE;
@@ -50,7 +69,9 @@ static uint64_t renesas_uart_mmio_read(void *opaque, hwaddr _addr, unsigned size
 
         if (p->st == p->cur) {
             qemu_set_irq(uart->irq_rxi, 0);
+            dlog("channel:%d irq_rxi off", channel);
         }
+    pthread_mutex_unlock(&mutex[channel]);
         break;
     }
     return value;
@@ -71,12 +92,15 @@ static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, 
         local_uart_write(uart, (const char *)&data, 1);
 #endif
         if (scr[channel] & SCI_SCR_TIE_MASK) {
-            dlog("channel:%d irq_txi", uart->channel);
-            qemu_irq_pulse(uart->irq_txi);
+            dlog("channel:%d irq_txi %02X", uart->channel, data);
+            // qemu_irq_pulse(uart->irq_txi);
+            qemu_set_irq(uart->irq_txi, 1);
         }
         break;
     case (uint64_t)&R_SCI0->SCR:
         if ((scr[channel] & SCI_SCR_TIE_MASK) && (!(value & SCI_SCR_TIE_MASK))) {
+            dlog("channel:%d irq_tei", uart->channel);
+            qemu_set_irq(uart->irq_txi, 0);
             qemu_irq_pulse(uart->irq_tei);
         }
         scr[channel] = value;
@@ -170,6 +194,7 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
     p->running = true;
     p->channel = channel;
 
+    pthread_mutex_init(&mutex[channel], NULL);
     ret = pthread_create(&p->th, NULL, local_uart_receive_main, (void *)p);
     ERR_RET(ret != 0, "pthread_create error");
 
@@ -206,6 +231,7 @@ static void local_uart_receive(int channel, const char *buf, size_t len) {
 static void to_rbuf(int channel, const char *buf, size_t len) {
     // dlog("IN len:%ld", len);
     uart_buf_t *p = &uart_rbuf[channel];
+    pthread_mutex_lock(&mutex[channel]);
     if (p->cur + len < MAX_BUF_SIZE) {
         // dlog("short");
         memcpy(&p->buf[p->cur], buf, len + 1);
@@ -219,10 +245,7 @@ static void to_rbuf(int channel, const char *buf, size_t len) {
         p->buf[len - copied] = '\0';
         p->cur = len - copied;
     }
-
-    // char *s = b2s(p->buf, MAX_BUF_SIZE);
-    // printf("st:%d cur:%d buf:\n%s\n", p->st, p->cur, s);
-    // dlog("OUT");
+    pthread_mutex_unlock(&mutex[channel]);
 }
 
 static void *local_uart_receive_main(void *arg) {
@@ -246,7 +269,7 @@ static void *local_uart_receive_main(void *arg) {
 
         int start = 0;
         buf[len] = '\0';
-        // dlog("buf:%s", buf);
+        dlog("buf:%s", buf);
         for (int i = start; i < len; i++) {
             if (buf[i] == ASCII_CODE_CR || buf[i] == ASCII_CODE_LF) {
                 buf[i] = '\n';
@@ -264,7 +287,7 @@ static void *local_uart_receive_main(void *arg) {
             p->rx_pos += len - start;
         }
         qemu_set_irq(p->irq_rxi, 1);
-        // dlog("received en");
+        dlog("received irq_rxi on");
     }
 error_return:
     return NULL;

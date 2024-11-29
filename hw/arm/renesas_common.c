@@ -3,7 +3,7 @@
 #include "ra2l1.h"
 #include "renesas_common.h"
 
-static char debug_str[0x400];
+static char debug_str[0x800];
 static char b2c(uint8_t b) {
     if (b < 10) {
         return '0' + b;
@@ -13,7 +13,7 @@ static char b2c(uint8_t b) {
         return '_';
     }
 }
-char *b2s(uint8_t *data, int n) {
+char *b2s(const uint8_t *data, int n) {
     int i;
     uint8_t upper, lower;
     char *p = debug_str;

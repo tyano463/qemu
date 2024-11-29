@@ -52,7 +52,6 @@ uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr _addr, unsigned size) {
     return value;
 }
 
-#if 0
 static uint64_t getfreq(void) {
     uint64_t candidates[] = {PCLKB, PCLKB / 8, 0, PCLKB / 2, 0, 0, 0, 0};
     return candidates[tck];
@@ -92,16 +91,14 @@ static void *timer_main(void *arg) {
     }
     return NULL;
 }
-#endif
 
 static void start_timer(void *opaque) {
-    // pthread_t th;
+    pthread_t th;
     int ret;
 
     if (!running) {
         running = true;
-        // ret = pthread_create(&th, NULL, timer_main, opaque);
-        ret = 0;
+        ret = pthread_create(&th, NULL, timer_main, opaque);
         if (ret) {
             dlog("timer thread create failed");
         }
@@ -131,11 +128,20 @@ static void setmode(uint64_t value, int kind) {
     }
 }
 
+static int agt_cnt = 0;
 void ra2l1_mmio_agt_write(void *opaque, hwaddr _addr, uint64_t value, unsigned size) {
     // dlog("a:%lx v:%lx", addr, value);
     renesas_agt_t *s = (renesas_agt_t *)opaque;
 
     hwaddr addr = s->baseaddr + _addr - (s->channel * ((intptr_t)R_AGT1 - (intptr_t)R_AGT0));
+    CPUState *cpu = (CPUState *)s->s->armv7m.cpu;
+    if (addr == 0x40084000 && value == 0x00005dc0) {
+        if (agt_cnt == 1) {
+            dlog("int_req:%d", cpu->interrupt_request);
+        }
+        agt_cnt++;
+    }
+
     switch (addr) {
     case (uintptr_t)&R_AGT0->AGT16.AGT:
         counter = (uint16_t)value & 0xffff;

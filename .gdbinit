@@ -6,3 +6,10 @@
 
 # Load QEMU-specific sub-commands and settings
 source scripts/qemu-gdb.py
+
+set pagination off
+set logging on
+
+#b ../qemu/accel/tcg/cpu-exec.c:752
+#b ../qemu/accel/tcg/translate-all.c:359
+r
