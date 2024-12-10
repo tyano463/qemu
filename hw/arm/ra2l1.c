@@ -144,8 +144,10 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
     s->aes = renesas_aes_init(system_memory, dev_soc, (intptr_t)R_AES);
     s->agt[0] = ra2l1_agt_init(system_memory, s, dev_soc, (intptr_t)R_AGT0, 0);
 
+    s->gpt[0] = ra2l1_gpt_add(system_memory, s, dev_soc, 0);
+
     ret = local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI0, 0);
-    // ret = local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI1, 1);
+    ret |= local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI2, 2);
     ret |= local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI9, 9);
     if (ret != OK)
     {

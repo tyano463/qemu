@@ -7,6 +7,7 @@
 #include "qemu/osdep.h"
 
 typedef struct ra_state RA2L1State;
+#include "ra2l1_gpt.h"
 #include "ra2l1_agt.h"
 #include "ra2l1_sc324_aes.h"
 
@@ -14,6 +15,7 @@ typedef struct ra_state RA2L1State;
 
 #define RA2L1_UART_NUM 10
 #define RA2L1_AGT_NUM 10
+#define RA2L1_GPT_NUM 10
 
 #define SCI_SCR_TIE_MASK (0x80U) ///< Transmit Interrupt Enable
 
@@ -55,6 +57,7 @@ typedef struct ra_state {
     MemoryRegion flash_alias;
     MemoryRegion flash_io;
     MemoryRegion mmio;
+    RA2L1GPTState *gpt[RA2L1_GPT_NUM];
     RA2L1UartState uart[RA2L1_UART_NUM];
     sc324_state_t *aes;
     renesas_agt_t *agt[RA2L1_AGT_NUM];

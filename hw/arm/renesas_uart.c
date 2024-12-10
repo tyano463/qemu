@@ -27,7 +27,7 @@ typedef struct str_uart_buf
     uint8_t *buf;
 } uart_buf_t;
 
-static void virtual_uart_cleanup(Notifier *n, void *opaque);
+// static void virtual_uart_cleanup(Notifier *n, void *opaque);
 static void *local_uart_receive_main(void *arg);
 static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size);
 static void local_uart_receive(int channel, const char *buf, size_t len);
@@ -73,7 +73,7 @@ static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, 
     static uint8_t data;
 
     // dlog("ch:%d %lx <- %lx", channel,
-    //      (hwaddr)_addr + ((hwaddr)R_SCI1_BASE - (hwaddr)R_SCI0_BASE) * channel, value);
+    //  (hwaddr)_addr + ((hwaddr)R_SCI1_BASE - (hwaddr)R_SCI0_BASE) * channel, value);
     switch (addr)
     {
     case (uint64_t)&R_SCI0->TDR:
@@ -119,7 +119,8 @@ static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2
         int txi;
         int tei;
         int rxi;
-    } irqnum[] = {{1, 2, 0}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {5, 6, 4}};
+        // } irqnum[] = {{1, 2, 0}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {5, 6, 4}};
+    } irqnum[] = {{1, 2, 0}, {-1}, {5, 6, 4}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}, {-1}};
 
     ERR_RET((channel < 0 || channel > MAX_MIN_VER), "invalid uart channel %d", channel);
     object_initialize_child(OBJECT(s), "uart[*]", &s->uart[channel], TYPE_RA2L1_UART);
@@ -178,11 +179,11 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
 
 #if RENESAS_LOCAL_UART
     sprintf(device_name, DEVPATH "%d", channel);
-    ret = mknod(device_name, S_IFCHR | 0666, makedev(DEV_MAJ_VER, channel));
-    ERR_RET(ret, "mknod failed");
+    // ret = mknod(device_name, S_IFCHR | 0666, makedev(DEV_MAJ_VER, channel));
+    // ERR_RET(ret, "mknod failed");
 
-    s->shutdown_notifier.notify = virtual_uart_cleanup;
-    qemu_register_shutdown_notifier(&s->shutdown_notifier);
+    // s->shutdown_notifier.notify = virtual_uart_cleanup;
+    // qemu_register_shutdown_notifier(&s->shutdown_notifier);
 
     while (1)
     {
@@ -212,10 +213,10 @@ error_return:
     return ret;
 }
 
-static void virtual_uart_cleanup(Notifier *n, void *opaque)
-{
-    remove(DEVPATH);
-}
+// static void virtual_uart_cleanup(Notifier *n, void *opaque)
+// {
+//     remove(DEVPATH);
+// }
 
 static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size)
 {

@@ -64,6 +64,7 @@ arm_ss.add(when: 'CONFIG_RA2L1', if_true: files(
   'ra2l1.c',
   'renesas_common.c',
   'ra2l1_agt.c',
+  'ra2l1_gpt.c',
   'ra2l1_flash.c',
   'ra2l1_sc324_aes.c',
   'ra2l1_gpio.c',
