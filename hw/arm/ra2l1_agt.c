@@ -8,6 +8,11 @@
 #include "ra2l1_agt.h"
 #include "renesas_common.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-label"
+
 #define BSP_HOCO_HZ 48000000
 #define PCLKB (BSP_HOCO_HZ >> 1)
 
@@ -79,14 +84,7 @@ static void *timer_main(void *arg)
     ns *= 100;
     interval.tv_sec = ns / 1e9;
     interval.tv_nsec = ns % (uint64_t)1e9;
-    typedef struct IRQState
-    {
-        Object parent_obj;
 
-        qemu_irq_handler handler;
-        void *opaque;
-        int n;
-    } irq_t;
     dlog("timer started handler:%p interval:%f", ((irq_t *)s->irq_agt)->handler,
          ((double)ns) / 1e9);
     while (running)
@@ -208,3 +206,5 @@ renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, RA2L1State *s, Device
     agt->s = s;
     return agt;
 }
+
+#pragma GCC diagnostic pop

@@ -9,6 +9,9 @@
 
 #define __FILENAME__ \
     (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+
+#define DEBUG_MODE 0
+#if DEBUG_MODE
 #define dlog(s, ...)                                                   \
     do                                                                 \
     {                                                                  \
@@ -16,6 +19,9 @@
                 ##__VA_ARGS__);                                        \
         fflush(stdout);                                                \
     } while (0)
+#else
+#define dlog(s, ...) (void)0
+#endif
 
 #define MALLOC2d(_type, x, y)                                               \
     ({                                                                      \
@@ -31,6 +37,7 @@
         (_out);                                                             \
     })
 
+#if DEBUG_MODE
 #define ERR_RET(c, s, ...)                                                 \
     do                                                                     \
     {                                                                      \
@@ -41,6 +48,10 @@
             goto error_return;                                             \
         }                                                                  \
     } while (0)
+#else
+#define ERR_RET(c, s, ...)
+
+#endif
 
 #define ERR_RETn(c)            \
     do                         \

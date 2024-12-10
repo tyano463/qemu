@@ -6,6 +6,12 @@
 
 #include "renesas_common.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-label"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
 #define TYPE_RA2L1_GPT "ra2l1-gpt"
 
 OBJECT_DECLARE_SIMPLE_TYPE(ra_gpt, RA2L1_GPT)
@@ -41,6 +47,7 @@ RA2L1GPTState *ra2l1_gpt_add(MemoryRegion *system_memory, RA2L1State *s, DeviceS
     hwaddr base_addr;
     hwaddr reg_size;
     Error *errp = NULL;
+    bool ret;
 
     p = g_new0(RA2L1GPTState, 1);
     object_initialize_child(OBJECT(s), "gpt[*]", p, TYPE_RA2L1_GPT);
@@ -48,14 +55,17 @@ RA2L1GPTState *ra2l1_gpt_add(MemoryRegion *system_memory, RA2L1State *s, DeviceS
     reg_size = ((hwaddr)R_GPT1 - (hwaddr)R_GPT0);
     base_addr = ((hwaddr)R_GPT0) + (reg_size * channel);
 
-    ERR_RET(!sysbus_realize(SYS_BUS_DEVICE(p), &errp), "gpt[%d] realize failed\n", channel);
+    ret = sysbus_realize(SYS_BUS_DEVICE(p), &errp);
+    ERR_RET(!ret, "gpt[%d] realize failed\n", channel);
 
     memory_region_init_io(&p->mmio, OBJECT(dev_soc), &ops, p, "renesas.gpt", reg_size);
     memory_region_add_subregion(system_memory, base_addr, &p->mmio);
 
     p->opaque = s;
     dlog("gpt %d initialized %p", channel, p);
+
 error_return:
+
     return p;
 }
 
@@ -89,3 +99,5 @@ static void ra2l1_gpt_register_types(void)
 }
 
 type_init(ra2l1_gpt_register_types)
+
+#pragma GCC diagnostic pop

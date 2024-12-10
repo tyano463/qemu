@@ -7,6 +7,12 @@
 #include <termios.h>
 #include <unistd.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-label"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
 #define DEVICE "/dev/ttyUSB0"
 #define BAUDRATE B115200
 #define BUF_SIZE 2048
@@ -100,3 +106,5 @@ static void configure_serial_port(int fd) {
 
     tcsetattr(fd, TCSANOW, &options);
 }
+
+#pragma GCC diagnostic pop

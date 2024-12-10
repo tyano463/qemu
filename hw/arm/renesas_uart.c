@@ -11,6 +11,12 @@
 #include "ra2l1.h"
 #include "renesas_common.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-label"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+
 #define DEVPATH "/dev/ttyQEMU"
 #define DEV_MAJ_VER 511
 #define MAX_MIN_VER (RA2L1_UART_NUM - 1)
@@ -114,6 +120,7 @@ static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2
     Error *errp = NULL;
     SysBusDevice *busdev;
     DeviceState *armv7m;
+    bool ret;
     struct
     {
         int txi;
@@ -130,7 +137,8 @@ static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2
     armv7m = DEVICE(&s->armv7m);
     dev = DEVICE(uart);
     qdev_prop_set_chr(dev, "chardev", serial_hd(channel));
-    ERR_RET(!sysbus_realize(SYS_BUS_DEVICE(uart), &errp), "uart[%d] realize failed\n", channel);
+    ret = sysbus_realize(SYS_BUS_DEVICE(uart), &errp);
+    ERR_RET(!ret, "uart[%d] realize failed\n", channel);
 
     busdev = SYS_BUS_DEVICE(dev);
 
@@ -381,3 +389,5 @@ static void ra2l1_uart_register_types(void)
 }
 
 type_init(ra2l1_uart_register_types)
+
+#pragma GCC diagnostic pop

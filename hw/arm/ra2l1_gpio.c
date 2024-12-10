@@ -9,6 +9,11 @@
 #include "ra2l1.h"
 #include "renesas_common.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wunused-label"
+
 #define GPIO_GUI_LIB_DIR "gpio_gui_lib"
 #define MONITOR_COMMAND "run_gui"
 #define LIB_GPIO_VAR "renesas_gpio"
@@ -22,7 +27,8 @@
 #define THREAD_WAIT_TIMEOUT_MS TO_MICROSEC(THREAD_WAIT_TIMEOUT)
 #define THREAD_CHECK_PERIOD_MS 1000
 
-typedef enum {
+typedef enum
+{
     PCNTR1,
     PCNTR2,
     PCNTR3,
@@ -31,7 +37,8 @@ typedef enum {
     INVAL = -1,
 } RegAddr;
 
-typedef struct {
+typedef struct
+{
     int port;
     int pin;
     hwaddr addr;
@@ -43,13 +50,15 @@ typedef void (*gui_func_t)(void);
 static renesas_gpio_t *gpio;
 static bool (*launched)(void);
 
-bool is_gpio(hwaddr addr) {
+bool is_gpio(hwaddr addr)
+{
     hwaddr reg_size = (hwaddr)R_PORT1 - (hwaddr)R_PORT0;
     return (((hwaddr)R_PORT0 <= addr) && (addr < ((hwaddr)R_PORT0) + reg_size * GPIO_PORT_NUM)) ||
            (((hwaddr)R_PFS <= addr) && (addr < ((hwaddr)R_PFS) + sizeof(R_PFS_Type)));
 }
 
-static void *launch(void *arg) {
+static void *launch(void *arg)
+{
     void *handle = dlopen(LIBRARY_FILE, RTLD_LAZY);
     ERR_RET(!handle, "%s", dlerror());
 
@@ -73,12 +82,14 @@ error_return:
     return NULL;
 }
 
-void gpio_monitor_launch(void) {
+void gpio_monitor_launch(void)
+{
     pthread_t th;
     int ret = pthread_create(&th, NULL, launch, NULL);
     ERR_RET(ret, "thread create failed");
 
-    for (int i = 0; i < THREAD_WAIT_TIMEOUT_MS / THREAD_CHECK_PERIOD_MS; i++) {
+    for (int i = 0; i < THREAD_WAIT_TIMEOUT_MS / THREAD_CHECK_PERIOD_MS; i++)
+    {
         if (launched)
             break;
         usleep(THREAD_CHECK_PERIOD_MS);
@@ -91,7 +102,8 @@ error_return:
     return;
 }
 
-static RegAddr get_register(hwaddr addr) {
+static RegAddr get_register(hwaddr addr)
+{
     R_PORT0_Type *p = NULL;
     if (addr == (hwaddr)&p->PCNTR1)
         return PCNTR1;
@@ -104,12 +116,14 @@ static RegAddr get_register(hwaddr addr) {
     return INVAL;
 }
 
-static int addr_to_reg(gpio_reg_t *reg, hwaddr addr) {
+static int addr_to_reg(gpio_reg_t *reg, hwaddr addr)
+{
     int ret = NG;
     size_t reg_size;
     hwaddr gpio_addr;
 
-    if (addr >= (hwaddr)R_PFS) {
+    if (addr >= (hwaddr)R_PFS)
+    {
         gpio_addr = addr - (hwaddr)R_PFS_BASE;
         reg->port = gpio_addr / sizeof(R_PFS_PORT_Type);
         ERR_RETn(reg->port >= GPIO_PORT_NUM);
@@ -120,7 +134,9 @@ static int addr_to_reg(gpio_reg_t *reg, hwaddr addr) {
         // dlog("pfs:%lx %d/%d %lx", gpio_addr, reg->port, reg->pin, reg->addr);
 
         reg->reg = PFS;
-    } else {
+    }
+    else
+    {
         reg_size = ((hwaddr)R_PORT1_BASE - (hwaddr)R_PORT0_BASE);
         gpio_addr = addr - (hwaddr)R_PORT0_BASE;
 
@@ -139,9 +155,11 @@ error_return:
 }
 
 char pin_str[32];
-static char *gpio_pin_value(uint16_t val) {
+static char *gpio_pin_value(uint16_t val)
+{
     const char *s = ".1";
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < 16; i++)
+    {
         pin_str[15 - i] = s[((val & (1 << i)) != 0)];
     }
     pin_str[16] = '\0';
@@ -149,7 +167,8 @@ static char *gpio_pin_value(uint16_t val) {
 }
 
 hwaddr bef_raddr;
-uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
+uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size)
+{
     uint64_t value = 0;
     int ret;
     gpio_reg_t reg;
@@ -157,13 +176,14 @@ uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
     ret = addr_to_reg(&reg, addr);
     ERR_RETn(ret != OK);
 
-
-    switch (reg.reg) {
+    switch (reg.reg)
+    {
     case PCNTR1:
         // PDRとPODRの両方がある。
         value = (uint64_t)((((uint16_t)(gpio[reg.port].val & 0xffff)) << 16) |
                            ((uint16_t)((gpio[reg.port].pdr & 0xffff))));
-        if (bef_raddr != addr) {
+        if (bef_raddr != addr)
+        {
             dlog("addr:%lx v:%lx port:%d (%s)", addr, value, reg.port,
                  gpio_pin_value(gpio[reg.port].val));
             bef_raddr = addr;
@@ -171,7 +191,8 @@ uint64_t ra2l1_gpio_read(void *opaque, hwaddr addr, unsigned size) {
         break;
     case PCNTR2:
         value = (uint64_t)((uint16_t)(gpio[reg.port].val & 0xffff));
-        if (bef_raddr != addr) {
+        if (bef_raddr != addr)
+        {
             dlog("addr:%lx v:%lx port:%d (%s)", addr, value, reg.port,
                  gpio_pin_value(gpio[reg.port].val));
             bef_raddr = addr;
@@ -191,7 +212,8 @@ error_return:
 }
 
 hwaddr bef_waddr;
-void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) {
+void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size)
+{
 
     int ret;
     gpio_reg_t reg;
@@ -205,18 +227,21 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) 
     upper = (value & 0xffff0000) >> 16;
     lower = (value & 0x0000ffff) >> 0;
 
-    switch (reg.reg) {
+    switch (reg.reg)
+    {
     case PCNTR1:
         gpio[reg.port].pdr = lower;
         gpio[reg.port].val = upper;
-        if (bef_waddr != addr) {
+        if (bef_waddr != addr)
+        {
             dlog("%lx <- %lx port:%d(%s)", addr, value, reg.port, gpio_pin_value(upper));
             bef_waddr = addr;
         }
         break;
     case PCNTR2:
         gpio[reg.port].val = lower;
-        if (bef_waddr != addr) {
+        if (bef_waddr != addr)
+        {
             dlog("%lx <- %lx port:%d(%s)", addr, value, reg.port, gpio_pin_value(lower));
             bef_waddr = addr;
         }
@@ -228,13 +253,16 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) 
     case PFS:
         uint32_t pdr = pfs->PmnPFS_b.PDR;
         uint32_t pcr = pfs->PmnPFS_b.PCR;
-        if (pdr) {
+        if (pdr)
+        {
             // output
             dlog("port:%d pin:%d output", reg.port, reg.pin);
-
-        } else {
+        }
+        else
+        {
             // input
-            if (pcr) {
+            if (pcr)
+            {
                 gpio[reg.port].val |= (1 << reg.pin);
             }
             dlog("port:%d pin:%d input pull-up:%d", reg.port, reg.pin, pcr);
@@ -249,3 +277,4 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size) 
 error_return:
     return;
 }
+#pragma GCC diagnostic pop
