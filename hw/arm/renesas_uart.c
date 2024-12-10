@@ -20,7 +20,8 @@
 
 OBJECT_DECLARE_SIMPLE_TYPE(ra_uart, RA2L1_UART)
 
-typedef struct str_uart_buf {
+typedef struct str_uart_buf
+{
     uint16_t st;
     uint16_t cur;
     uint8_t *buf;
@@ -35,49 +36,37 @@ static pthread_mutex_t mutex[RA2L1_UART_NUM];
 static uint64_t scr[RA2L1_UART_NUM];
 static uart_buf_t *uart_rbuf;
 
-#define TYPE_MY_DEVICE "my-device"
-
-typedef struct MyDevice
+static uint64_t renesas_uart_mmio_read(void *opaque, hwaddr _addr, unsigned size)
 {
-    DeviceState parent_obj;
-
-    int reg0, reg1, reg2;
-} MyDevice;
-static const TypeInfo device_types_info[] = {
-    {
-        .name = TYPE_MY_DEVICE,
-        .parent = TYPE_DEVICE,
-        .instance_size = sizeof(MyDevice),
-    },
-};
-DEFINE_TYPES(device_types_info)
-
-static uint64_t renesas_uart_mmio_read(void *opaque, hwaddr _addr, unsigned size) {
     hwaddr addr = _addr + (intptr_t)R_SCI0;
     RA2L1UartState *uart = (RA2L1UartState *)opaque;
     int channel = uart->channel;
     uint64_t value = 0;
     uart_buf_t *p = &uart_rbuf[channel];
 
-    switch (addr) {
+    switch (addr)
+    {
     case (uint64_t)&R_SCI0->RDR:
-    pthread_mutex_lock(&mutex[channel]);
-        if (p->st != p->cur) {
+        pthread_mutex_lock(&mutex[channel]);
+        if (p->st != p->cur)
+        {
             value = p->buf[p->st++];
             p->st %= MAX_BUF_SIZE;
         }
 
-        if (p->st == p->cur) {
+        if (p->st == p->cur)
+        {
             qemu_set_irq(uart->irq_rxi, 0);
             dlog("channel:%d irq_rxi off", channel);
         }
-    pthread_mutex_unlock(&mutex[channel]);
+        pthread_mutex_unlock(&mutex[channel]);
         break;
     }
     return value;
 }
 
-static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, unsigned size) {
+static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, unsigned size)
+{
     RA2L1UartState *uart = (RA2L1UartState *)opaque;
     hwaddr addr = _addr + (intptr_t)R_SCI0;
     int channel = uart->channel;
@@ -85,20 +74,23 @@ static void renesas_uart_mmio_write(void *opaque, hwaddr _addr, uint64_t value, 
 
     // dlog("ch:%d %lx <- %lx", channel,
     //      (hwaddr)_addr + ((hwaddr)R_SCI1_BASE - (hwaddr)R_SCI0_BASE) * channel, value);
-    switch (addr) {
+    switch (addr)
+    {
     case (uint64_t)&R_SCI0->TDR:
         data = (uint8_t)(value & 0xff);
 #if RENESAS_LOCAL_UART
         local_uart_write(uart, (const char *)&data, 1);
 #endif
-        if (scr[channel] & SCI_SCR_TIE_MASK) {
+        if (scr[channel] & SCI_SCR_TIE_MASK)
+        {
             dlog("channel:%d irq_txi %02X", uart->channel, data);
             // qemu_irq_pulse(uart->irq_txi);
             qemu_set_irq(uart->irq_txi, 1);
         }
         break;
     case (uint64_t)&R_SCI0->SCR:
-        if ((scr[channel] & SCI_SCR_TIE_MASK) && (!(value & SCI_SCR_TIE_MASK))) {
+        if ((scr[channel] & SCI_SCR_TIE_MASK) && (!(value & SCI_SCR_TIE_MASK)))
+        {
             dlog("channel:%d irq_tei", uart->channel);
             qemu_set_irq(uart->irq_txi, 0);
             qemu_irq_pulse(uart->irq_tei);
@@ -113,16 +105,17 @@ MemoryRegionOps ops = {
     .write = renesas_uart_mmio_write,
 };
 
-volatile int loop = 1;
 static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2L1State *s,
                                                 DeviceState *dev_soc, hwaddr base_addr,
-                                                int channel) {
+                                                int channel)
+{
     RA2L1UartState *uart = NULL;
     DeviceState *dev;
     Error *errp = NULL;
     SysBusDevice *busdev;
     DeviceState *armv7m;
-    struct {
+    struct
+    {
         int txi;
         int tei;
         int rxi;
@@ -140,7 +133,8 @@ static RA2L1UartState *renesas_uart_device_init(MemoryRegion *system_memory, RA2
 
     busdev = SYS_BUS_DEVICE(dev);
 
-    if (irqnum[channel].txi != -1) {
+    if (irqnum[channel].txi != -1)
+    {
         sysbus_connect_irq(busdev, 0, qdev_get_gpio_in(armv7m, irqnum[channel].txi));
         sysbus_connect_irq(busdev, 1, qdev_get_gpio_in(armv7m, irqnum[channel].tei));
         sysbus_connect_irq(busdev, 2, qdev_get_gpio_in(armv7m, irqnum[channel].rxi));
@@ -159,20 +153,23 @@ error_return:
 }
 
 int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev_soc,
-                    hwaddr base_addr, int channel) {
+                    hwaddr base_addr, int channel)
+{
     int ret = -1;
     char device_name[64];
     RA2L1UartState *p;
 
     p = renesas_uart_device_init(system_memory, s, dev_soc, base_addr, channel);
-    ERR_RETn(!p);
+    ERR_RET(!p, "renesas_uart_device_init failed");
     ret = 0;
 
-    if (!uart_rbuf) {
+    if (!uart_rbuf)
+    {
         uart_rbuf = malloc(sizeof(uart_buf_t) * RA2L1_UART_NUM + MAX_BUF_SIZE * RA2L1_UART_NUM);
     }
 
-    for (int i = 0; i < RA2L1_UART_NUM; i++) {
+    for (int i = 0; i < RA2L1_UART_NUM; i++)
+    {
         uart_rbuf[i].buf = ((uint8_t *)&uart_rbuf[RA2L1_UART_NUM]) + (MAX_BUF_SIZE * i);
         uart_rbuf[i].buf[0] = '\0';
         uart_rbuf[i].cur = 0;
@@ -187,8 +184,19 @@ int local_uart_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev
     s->shutdown_notifier.notify = virtual_uart_cleanup;
     qemu_register_shutdown_notifier(&s->shutdown_notifier);
 
+    while (1)
+    {
+        int fd = open(device_name, O_RDWR);
+        if (fd >= 0)
+        {
+            close(fd);
+            break;
+        }
+        usleep(10000);
+    }
+
     p->fd = open(device_name, O_RDWR);
-    ERR_RETn(p->fd < 0);
+    ERR_RET(p->fd < 0, "%s open failed %d", device_name, channel);
 
     p->callback = local_uart_receive;
     p->running = true;
@@ -204,14 +212,17 @@ error_return:
     return ret;
 }
 
-static void virtual_uart_cleanup(Notifier *n, void *opaque) {
+static void virtual_uart_cleanup(Notifier *n, void *opaque)
+{
     remove(DEVPATH);
 }
 
-static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size) {
+static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size)
+{
     static char buf[256];
     memcpy(buf, str, size);
-    if (uart->fd >= 0) {
+    if (uart->fd >= 0)
+    {
         write(uart->fd, str, size);
         // buf[size] = '\0';
         // dlog("%s", buf);
@@ -219,7 +230,8 @@ static void local_uart_write(RA2L1UartState *uart, const char *str, size_t size)
     return;
 }
 
-static void local_uart_receive(int channel, const char *buf, size_t len) {
+static void local_uart_receive(int channel, const char *buf, size_t len)
+{
     static char temp_buf[256];
     if (sizeof(temp_buf) <= len)
         return;
@@ -228,16 +240,19 @@ static void local_uart_receive(int channel, const char *buf, size_t len) {
     dlog("ch:%d receive:%s", channel, temp_buf);
 }
 
-static void to_rbuf(int channel, const char *buf, size_t len) {
+static void to_rbuf(int channel, const char *buf, size_t len)
+{
     // dlog("IN len:%ld", len);
     uart_buf_t *p = &uart_rbuf[channel];
-    pthread_mutex_lock(&mutex[channel]);
-    if (p->cur + len < MAX_BUF_SIZE) {
+    if (p->cur + len < MAX_BUF_SIZE)
+    {
         // dlog("short");
         memcpy(&p->buf[p->cur], buf, len + 1);
         p->cur += len;
         p->buf[p->cur] = '\0';
-    } else {
+    }
+    else
+    {
         // dlog("loop");
         int copied = p->cur + len - MAX_BUF_SIZE - 1;
         memcpy(&p->buf[p->cur], buf, copied);
@@ -245,10 +260,10 @@ static void to_rbuf(int channel, const char *buf, size_t len) {
         p->buf[len - copied] = '\0';
         p->cur = len - copied;
     }
-    pthread_mutex_unlock(&mutex[channel]);
 }
 
-static void *local_uart_receive_main(void *arg) {
+static void *local_uart_receive_main(void *arg)
+{
 
     char buf[MAX_BUF_SIZE];
     RA2L1UartState *p = (RA2L1UartState *)arg;
@@ -256,9 +271,10 @@ static void *local_uart_receive_main(void *arg) {
 
     ERR_RETn(channel < 0 || channel > MAX_MIN_VER);
 
-    dlog("uart receiver launched %p ch:%d tid:%lx", p, p->channel, pthread_self());
+    dlog("uart receiver launched %p ch:%d fd:%d tid:%lx", p, p->channel, p->fd, pthread_self());
 
-    while (p->running) {
+    while (p->running)
+    {
         ssize_t len = read(p->fd, buf, MAX_BUF_SIZE);
         ERR_RET(len < 0, "uart read error");
         if (!len)
@@ -269,11 +285,14 @@ static void *local_uart_receive_main(void *arg) {
 
         int start = 0;
         buf[len] = '\0';
-        dlog("buf:%s", buf);
-        for (int i = start; i < len; i++) {
-            if (buf[i] == ASCII_CODE_CR || buf[i] == ASCII_CODE_LF) {
+        dlog("ch:%d fd:%d (%lu) buf:%s", channel, p->fd, len, buf);
+        for (int i = start; i < len; i++)
+        {
+            if (buf[i] == ASCII_CODE_CR || buf[i] == ASCII_CODE_LF)
+            {
                 buf[i] = '\n';
-                if ((p->rx_pos + i) > start) {
+                if ((p->rx_pos + i) > start)
+                {
                     memcpy(&p->rx_buf[p->rx_pos], buf, i + 1);
                     if (p->callback)
                         p->callback(channel, p->rx_buf, p->rx_pos + i + 1);
@@ -282,12 +301,13 @@ static void *local_uart_receive_main(void *arg) {
                 }
             }
         }
-        if (start < len) {
+        if (start < len)
+        {
             memcpy(&p->rx_buf[p->rx_pos], &buf[start], len - start);
             p->rx_pos += len - start;
         }
         qemu_set_irq(p->irq_rxi, 1);
-        dlog("received irq_rxi on");
+        dlog("ch:%d received irq_rxi on", channel);
     }
 error_return:
     return NULL;
@@ -298,22 +318,26 @@ static Property ra2l1_uart_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void ra2l1_update_irq(RA2L1UartState *s) {
+static void ra2l1_update_irq(RA2L1UartState *s)
+{
 }
 
-static int ra2l1_uart_can_receive(void *opaque) {
+static int ra2l1_uart_can_receive(void *opaque)
+{
     RA2L1UartState *s = opaque;
     (void)s;
     return 0;
 }
 
-static void ra2l1_uart_receive(void *opaque, const uint8_t *buf, int size) {
+static void ra2l1_uart_receive(void *opaque, const uint8_t *buf, int size)
+{
     RA2L1UartState *s = opaque;
 
     ra2l1_update_irq(s);
 }
 
-static void ra2l1_uart_init(Object *obj) {
+static void ra2l1_uart_init(Object *obj)
+{
     RA2L1UartState *s = RA2L1_UART(obj);
 
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_txi);
@@ -321,16 +345,20 @@ static void ra2l1_uart_init(Object *obj) {
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq_rxi);
 }
 
-static void ra2l1_uart_reset(DeviceState *dev) {
+static void ra2l1_uart_reset(DeviceState *dev)
+{
 }
-static void ra2l1_uart_realize(DeviceState *dev, Error **errp) {
+
+static void ra2l1_uart_realize(DeviceState *dev, Error **errp)
+{
     RA2L1UartState *s = RA2L1_UART(dev);
 
     qemu_chr_fe_set_handlers(&s->chr, ra2l1_uart_can_receive, ra2l1_uart_receive, NULL, NULL, s,
                              NULL, true);
 }
 
-static void ra2l1_uart_class_init(ObjectClass *klass, void *data) {
+static void ra2l1_uart_class_init(ObjectClass *klass, void *data)
+{
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->reset = ra2l1_uart_reset;
@@ -346,7 +374,8 @@ static const TypeInfo ra2l1_uart_info = {
     .class_init = ra2l1_uart_class_init,
 };
 
-static void ra2l1_uart_register_types(void) {
+static void ra2l1_uart_register_types(void)
+{
     type_register_static(&ra2l1_uart_info);
 }
 

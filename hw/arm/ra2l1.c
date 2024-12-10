@@ -44,7 +44,6 @@ OBJECT_DECLARE_SIMPLE_TYPE(ra_state, RA2L1_SYS)
 static uint64_t ra2l1_mmio_read(void *opaque, hwaddr, unsigned size);
 static void ra2l1_mmio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size);
 // static void uart_write(void *opaque, int kind, uint8_t data);
-static void register_irq(DeviceState *dev_soc, DeviceState *armv7m);
 
 void im920_init(void (*received)(char *, int));
 void im920_write(char *, int);
@@ -143,17 +142,15 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
     memory_region_add_subregion(system_memory, PERIPHERAL_BASE, &s->mmio);
 
     s->aes = renesas_aes_init(system_memory, dev_soc, (intptr_t)R_AES);
-    s->agt[0] = ra2l1_agt_init(system_memory, dev_soc, (intptr_t)R_AGT0, 0);
-    s->agt[0]->s = s;
+    s->agt[0] = ra2l1_agt_init(system_memory, s, dev_soc, (intptr_t)R_AGT0, 0);
 
     ret = local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI0, 0);
+    // ret = local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI1, 1);
     ret |= local_uart_init(system_memory, s, dev_soc, (intptr_t)R_SCI9, 9);
     if (ret != OK)
     {
         exit(0);
     }
-
-    register_irq(dev_soc, armv7m);
 
     uart_wbuf = MALLOC2d(uint8_t, 1024, 10);
     uart_windex = calloc(sizeof(uint16_t) * 10, 1);
@@ -161,17 +158,6 @@ static void ra2l1_soc_realize(DeviceState *dev_soc, Error **errp)
     gpio_monitor_launch();
 
     qemu_mutex_init(&s->lock);
-}
-
-static void register_irq(DeviceState *dev_soc, DeviceState *armv7m)
-{
-    // Timer
-    RA2L1State *s = RA2L1_SYS(dev_soc);
-    dlog("%p", s->agt[0]->irq_agt);
-    sysbus_connect_irq(SYS_BUS_DEVICE(dev_soc), 0, qdev_get_gpio_in(armv7m, 3));
-
-    irq_t *p = (irq_t *)s->agt[0]->irq_agt;
-    dlog("%p %p", p, p->handler);
 }
 
 static uint64_t mosccr = 1;

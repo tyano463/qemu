@@ -11,7 +11,8 @@
 #define AGT_PRV_AGTCR_STOP_TIMER (0xF0U)
 #define AGT_PRV_AGTCR_START_TIMER (0xF1U)
 
-typedef struct str_renesas_agt {
+typedef struct str_renesas_agt
+{
     SysBusDevice parent;
     MemoryRegion mmio;
     int channel;
@@ -26,5 +27,5 @@ uint64_t ra2l1_mmio_agt_read(void *opaque, hwaddr addr, unsigned size);
 void ra2l1_mmio_agt_write(void *opaque, hwaddr addr, uint64_t value,
                           unsigned size);
 
-renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, DeviceState *s, hwaddr baseaddr, int channel);
+renesas_agt_t *ra2l1_agt_init(MemoryRegion *system_memory, RA2L1State *s, DeviceState *dev_soc, hwaddr baseaddr, int channel);
 #endif
