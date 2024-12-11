@@ -49,8 +49,14 @@
         }                                                                  \
     } while (0)
 #else
-#define ERR_RET(c, s, ...)
-
+#define ERR_RET(c, s, ...)     \
+    do                         \
+    {                          \
+        if (c)                 \
+        {                      \
+            goto error_return; \
+        }                      \
+    } while (0)
 #endif
 
 #define ERR_RETn(c)            \

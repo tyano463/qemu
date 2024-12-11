@@ -93,13 +93,19 @@ system_ss.add(when: 'CONFIG_Z2', if_true: files('z2.c'))
 system_ss.add(when: 'CONFIG_VEXPRESS', if_true: files('vexpress.c'))
 system_ss.add(when: 'CONFIG_Z2', if_true: files('z2.c'))
 
-custom_target('copy_files_from_submodule',
-  output: 'dummy',
-  command: [
-    'cp', '-r', meson.current_source_dir() / 'gpio_gui_lib' / 'libx11_gpio.so',
-    meson.build_root() / 'libx11_gpio.so'
-  ],
-  build_by_default: true
-)
+if run_command('test', '-d', meson.current_source_dir() / 'gpio_gui_lib').returncode() == 0
+  run_command('make', '-C', meson.current_source_dir() / 'gpio_gui_lib')
+endif
+
+if run_command('test', '-f', meson.current_source_dir() / 'gpio_gui_lib' / 'libx11_gpio.so').returncode() == 0
+  custom_target('copy_files_from_submodule',
+    output: 'dummy',
+    command: [
+      'cp', '-r', meson.current_source_dir() / 'gpio_gui_lib' / 'libx11_gpio.so',
+      meson.build_root() / 'libx11_gpio.so'
+    ],
+    build_by_default: true
+  )
+endif
 
 hw_arch += {'arm': arm_ss}

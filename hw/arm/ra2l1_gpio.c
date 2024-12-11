@@ -261,7 +261,7 @@ void ra2l1_gpio_write(void *opaque, hwaddr addr, uint64_t value, unsigned size)
         else
         {
             // input
-            if (pcr)
+            if (pcr && gpio)
             {
                 gpio[reg.port].val |= (1 << reg.pin);
             }
